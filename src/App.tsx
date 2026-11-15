@@ -36,6 +36,7 @@ import {
   Edit3,
   Image as ImageIcon,
 } from 'lucide-react';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { supabase } from './lib/supabase';
 import { AuthScreen } from './components/AuthScreen';
 import { Conversation, Message, Profile, UserStatus } from './types';
@@ -220,6 +221,29 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Xin quyền thông báo & tạo kênh thông báo cho Android APK
+  useEffect(() => {
+    if (!sessionUserId) return;
+    (async () => {
+      try {
+        const perm = await LocalNotifications.checkPermissions();
+        if (perm.display !== 'granted') {
+          await LocalNotifications.requestPermissions();
+        }
+        await LocalNotifications.createChannel({
+          id: 'bocphet_messages',
+          name: 'Tin nhắn BocPhet Chat',
+          description: 'Thông báo tin nhắn mới',
+          importance: 5,
+          visibility: 1,
+          vibration: true,
+        });
+      } catch {
+        // Bỏ qua nếu đang chạy trên trình duyệt web thường
+      }
+    })();
+  }, [sessionUserId]);
+
   // Tìm kiếm GIF qua Tenor public API hoặc lọc danh sách có sẵn
   useEffect(() => {
     if (!showGifPicker) return;
@@ -229,7 +253,6 @@ export default function App() {
       return;
     }
 
-    // Nếu người dùng dán trực tiếp URL .gif
     if (/^https?:\/\/\S+\.gif(\?\S*)?$/i.test(q)) {
       setGifResults([{ label: 'Link GIF trực tiếp', url: q }]);
       return;
@@ -386,7 +409,7 @@ export default function App() {
     loadMyData(sessionUserId);
   }, [sessionUserId]);
 
-  // 3. Global Realtime Presence, Database Sync & WebRTC Call Signaling
+  // 3. Global Realtime Presence, Database Sync, Notifications & WebRTC Call Signaling
   useEffect(() => {
     if (!sessionUserId || !me) return;
 
@@ -433,21 +456,53 @@ export default function App() {
           }
         }
       )
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
         const newMsg = payload.new as any;
-        if (newMsg.sender_id !== sessionUserId && newMsg.conversation_id !== activeConvIdRef.current) {
-          setConversations((prev) =>
-            prev.map((c) =>
-              c.id === newMsg.conversation_id
-                ? {
-                    ...c,
-                    unread_count: (c.unread_count || 0) + 1,
-                    last_message_text: newMsg.content,
-                    last_message_at: newMsg.created_at,
-                  }
-                : c
-            )
-          );
+        if (newMsg.sender_id !== sessionUserId) {
+          const isDifferentChat = newMsg.conversation_id !== activeConvIdRef.current;
+          const isAppHidden = document.hidden;
+
+          if (isDifferentChat) {
+            setConversations((prev) =>
+              prev.map((c) =>
+                c.id === newMsg.conversation_id
+                  ? {
+                      ...c,
+                      unread_count: (c.unread_count || 0) + 1,
+                      last_message_text: newMsg.content,
+                      last_message_at: newMsg.created_at,
+                    }
+                  : c
+              )
+            );
+          }
+
+          if (isDifferentChat || isAppHidden) {
+            try {
+              const { data: sender } = await supabase
+                .from('profiles')
+                .select('display_name, username')
+                .eq('id', newMsg.sender_id)
+                .maybeSingle();
+
+              const senderTitle = sender?.display_name || sender?.username || 'Tin nhắn mới';
+              const bodyText = extractGifUrl(newMsg.content) ? '🎞️ Đã gửi một ảnh GIF' : newMsg.content;
+
+              await LocalNotifications.schedule({
+                notifications: [
+                  {
+                    id: Math.floor(Date.now() % 2147483647),
+                    title: senderTitle,
+                    body: bodyText,
+                    channelId: 'bocphet_messages',
+                    schedule: { at: new Date(Date.now() + 100) },
+                  },
+                ],
+              });
+            } catch {
+              // Bỏ qua nếu đang chạy trên web
+            }
+          }
         }
       })
       .subscribe();
@@ -1790,7 +1845,7 @@ export default function App() {
                             </span>
                           )}
 
-                        <div
+                          <div
                             className={`${
                               gifUrl ? 'p-1.5' : 'px-3.5 py-2.5'
                             } rounded-2xl text-sm leading-relaxed relative overflow-hidden ${
