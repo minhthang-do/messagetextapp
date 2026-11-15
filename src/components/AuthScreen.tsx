@@ -128,7 +128,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       return;
     }
     if (otp.trim().length < 6) {
-      setError('Please enter the 6-digit code from your email.');
+      setError('Please enter the 8-digit code from your email.');
       return;
     }
 
@@ -545,7 +545,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                   required
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
+                  placeholder="12345678"
                   className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-10 pr-3.5 py-2.5 text-center font-mono text-lg tracking-[0.4em] text-white outline-none transition"
                 />
               </div>
