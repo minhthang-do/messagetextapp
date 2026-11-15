@@ -36,6 +36,7 @@ import {
   Edit3,
   Image as ImageIcon,
 } from 'lucide-react';
+import { App as CapApp } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { supabase } from './lib/supabase';
 import { AuthScreen } from './components/AuthScreen';
@@ -155,6 +156,8 @@ export default function App() {
     activeConvIdRef.current = activeConvId;
   }, [activeConvId]);
 
+  const isAppInBackgroundRef = useRef<boolean>(false);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageInput, setMessageInput] = useState('');
@@ -175,6 +178,7 @@ export default function App() {
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const typingTimeoutRef = useRef<number | null>(null);
+  const remoteTypingTimersRef = useRef<Record<string, number>>({});
   const channelRef = useRef<any>(null);
   const callSignalChannelRef = useRef<any>(null);
 
@@ -220,6 +224,32 @@ export default function App() {
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Theo dõi trạng thái ứng dụng (Foreground / Background) trên Android/iOS & Web
+  useEffect(() => {
+    let stateListener: any = null;
+    const handleVisibility = () => {
+      isAppInBackgroundRef.current = document.hidden;
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    (async () => {
+      try {
+        stateListener = await CapApp.addListener('appStateChange', ({ isActive }) => {
+          isAppInBackgroundRef.current = !isActive;
+        });
+      } catch {
+        // Bỏ qua nếu đang chạy trên trình duyệt web thường
+      }
+    })();
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (stateListener) {
+        stateListener.remove();
+      }
+    };
+  }, []);
 
   // Xin quyền thông báo & tạo kênh thông báo cho Android APK
   useEffect(() => {
@@ -460,7 +490,7 @@ export default function App() {
         const newMsg = payload.new as any;
         if (newMsg.sender_id !== sessionUserId) {
           const isDifferentChat = newMsg.conversation_id !== activeConvIdRef.current;
-          const isAppHidden = document.hidden;
+          const isAppHidden = document.hidden || isAppInBackgroundRef.current;
 
           if (isDifferentChat) {
             setConversations((prev) =>
@@ -585,6 +615,8 @@ export default function App() {
     let isMounted = true;
     setLoadingMessages(true);
     setTypingUsers({});
+    Object.values(remoteTypingTimersRef.current).forEach((t) => window.clearTimeout(t));
+    remoteTypingTimersRef.current = {};
     setEditingGroupName(false);
     setShowGifPicker(false);
     setShowEmojiPicker(false);
@@ -642,20 +674,40 @@ export default function App() {
       )
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
         if (payload.user_id === sessionUserId) return;
+        const typingLabel = payload.display_name || payload.username || 'Ai đó';
+
+        if (remoteTypingTimersRef.current[payload.user_id]) {
+          window.clearTimeout(remoteTypingTimersRef.current[payload.user_id]);
+          delete remoteTypingTimersRef.current[payload.user_id];
+        }
+
         setTypingUsers((prev) => {
           const next = { ...prev };
           if (payload.is_typing) {
-            next[payload.user_id] = payload.username;
+            next[payload.user_id] = typingLabel;
           } else {
             delete next[payload.user_id];
           }
           return next;
         });
+
+        if (payload.is_typing) {
+          remoteTypingTimersRef.current[payload.user_id] = window.setTimeout(() => {
+            setTypingUsers((prev) => {
+              const next = { ...prev };
+              delete next[payload.user_id];
+              return next;
+            });
+            delete remoteTypingTimersRef.current[payload.user_id];
+          }, 3500);
+        }
       })
       .subscribe();
 
     return () => {
       isMounted = false;
+      Object.values(remoteTypingTimersRef.current).forEach((t) => window.clearTimeout(t));
+      remoteTypingTimersRef.current = {};
       supabase.removeChannel(roomChannel);
       channelRef.current = null;
     };
@@ -988,10 +1040,16 @@ export default function App() {
     setMessageInput(val);
     if (!channelRef.current || !me) return;
 
+    const senderDisplayName = me.display_name || me.username;
     channelRef.current.send({
       type: 'broadcast',
       event: 'typing',
-      payload: { user_id: me.id, username: me.username, is_typing: val.length > 0 },
+      payload: {
+        user_id: me.id,
+        username: me.username,
+        display_name: senderDisplayName,
+        is_typing: val.length > 0,
+      },
     });
 
     if (typingTimeoutRef.current) window.clearTimeout(typingTimeoutRef.current);
@@ -999,7 +1057,12 @@ export default function App() {
       channelRef.current?.send({
         type: 'broadcast',
         event: 'typing',
-        payload: { user_id: me.id, username: me.username, is_typing: false },
+        payload: {
+          user_id: me.id,
+          username: me.username,
+          display_name: senderDisplayName,
+          is_typing: false,
+        },
       });
     }, 2000);
   };
@@ -1016,7 +1079,12 @@ export default function App() {
     channelRef.current?.send({
       type: 'broadcast',
       event: 'typing',
-      payload: { user_id: sessionUserId, username: me?.username, is_typing: false },
+      payload: {
+        user_id: sessionUserId,
+        username: me?.username,
+        display_name: me?.display_name || me?.username,
+        is_typing: false,
+      },
     });
 
     await supabase.from('messages').insert({
@@ -1270,6 +1338,8 @@ export default function App() {
     activeConversation?.created_by === sessionUserId ||
     myMembership?.role === 'owner';
   const isGroupAdmin = isGroupOwner || myMembership?.role === 'admin';
+
+  const typingNames = Object.values(typingUsers);
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -1726,9 +1796,9 @@ export default function App() {
                             <AdminNameBadge name={info.title} isAdmin={info.isAdmin} size="xs" />
                           </h3>
                           <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                            {Object.keys(typingUsers).length > 0 ? (
+                            {typingNames.length > 0 ? (
                               <span className="text-indigo-500 dark:text-indigo-400 font-medium">
-                                {Object.values(typingUsers).join(', ')} đang nhập...
+                                {typingNames.join(', ')} đang nhắn tin...
                               </span>
                             ) : activeConversation.type === 'direct' ? (
                               info.online ? (
@@ -1905,6 +1975,22 @@ export default function App() {
                     );
                   })
                 )}
+
+                {typingNames.length > 0 && (
+                  <div className="flex items-center gap-2 pt-1 pl-1">
+                    <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-2xl rounded-bl-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                      <span className="flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.3s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.15s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" />
+                      </span>
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                        {typingNames.join(', ')} đang nhắn tin...
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 <div ref={messagesEndRef} />
               </div>
 
