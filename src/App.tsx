@@ -24,12 +24,52 @@ import {
   Shield,
   Ban,
   CheckCircle,
+  Crown,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { AuthScreen } from './components/AuthScreen';
 import { Conversation, Message, Profile, UserStatus } from './types';
 
 const EMOJIS = ['😀', '😂', '🔥', '❤️', '👍', '🎉', '🚀', '🙌', '😎', '🤔', '💯', '✨', '👏', '🥳', '💡', '🤝'];
+
+// Component hiển thị Tên + Huy hiệu Vương miện & Viền vàng nổi bật cho Admin
+function AdminNameBadge({
+  name,
+  isAdmin,
+  lightText = false,
+  size = 'sm',
+}: {
+  name: string;
+  isAdmin?: boolean;
+  lightText?: boolean;
+  size?: 'xs' | 'sm';
+}) {
+  if (!isAdmin) {
+    return <span className="truncate">{name}</span>;
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 min-w-0">
+      <span
+        className={`font-extrabold truncate ${
+          lightText
+            ? 'text-amber-200 drop-shadow-[0_0_8px_rgba(251,191,36,0.65)]'
+            : 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(245,158,11,0.35)]'
+        }`}
+      >
+        {name}
+      </span>
+      <span
+        className={`inline-flex items-center gap-0.5 rounded-full font-extrabold uppercase tracking-wider shrink-0 border border-amber-400/80 bg-gradient-to-r from-amber-500/25 to-yellow-500/20 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.35)] ${
+          size === 'xs' ? 'px-1.5 py-0 text-[9px]' : 'px-2 py-0.5 text-[10px]'
+        }`}
+      >
+        <Crown className={size === 'xs' ? 'w-2.5 h-2.5 text-amber-300 fill-amber-400/40' : 'w-3 h-3 text-amber-300 fill-amber-400/40'} />
+        ADMIN
+      </span>
+    </span>
+  );
+}
 
 export default function App() {
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
@@ -660,6 +700,7 @@ export default function App() {
         subtitle: `${conv.members?.length || 0} members`,
         avatar: conv.avatar_url,
         online: false,
+        isAdmin: false,
       };
     }
     const other = conv.members?.find((m) => m.user_id !== sessionUserId)?.profile;
@@ -670,6 +711,7 @@ export default function App() {
       avatar: other?.avatar_url || null,
       online: isOnline,
       otherUser: other,
+      isAdmin: Boolean(other?.is_admin),
     };
   };
 
@@ -707,7 +749,13 @@ export default function App() {
                 title="Cài đặt hồ sơ cá nhân"
                 className="relative group shrink-0 cursor-pointer"
               >
-                <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-indigo-600/20 overflow-hidden ring-2 ring-transparent group-hover:ring-indigo-500 transition">
+                <div
+                  className={`w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm overflow-hidden transition ${
+                    me?.is_admin
+                      ? 'ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
+                      : 'shadow-md shadow-indigo-600/20 ring-2 ring-transparent group-hover:ring-indigo-500'
+                  }`}
+                >
                   {me?.avatar_url ? (
                     <img src={me.avatar_url} alt={me.username} className="w-full h-full object-cover" />
                   ) : me?.username ? (
@@ -783,7 +831,11 @@ export default function App() {
                           onClick={() => startDirectChat(u)}
                           className="flex items-center gap-2.5 text-left flex-1 min-w-0"
                         >
-                          <div className="w-8 h-8 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                          <div
+                            className={`w-8 h-8 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
+                              u.is_admin ? 'ring-2 ring-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.45)]' : ''
+                            }`}
+                          >
                             {u.avatar_url ? (
                               <img src={u.avatar_url} alt={u.username} className="w-full h-full object-cover" />
                             ) : (
@@ -791,7 +843,9 @@ export default function App() {
                             )}
                           </div>
                           <div className="truncate">
-                            <p className="text-xs font-semibold truncate">{u.display_name}</p>
+                            <p className="text-xs font-semibold truncate">
+                              <AdminNameBadge name={u.display_name} isAdmin={u.is_admin} size="xs" />
+                            </p>
                             <p className="text-[11px] text-slate-400 truncate">@{u.username}</p>
                           </div>
                         </button>
@@ -830,7 +884,13 @@ export default function App() {
                       className="flex flex-col items-center gap-1 shrink-0 w-14 group"
                     >
                       <div className="relative">
-                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-indigo-400 overflow-hidden ring-2 ring-transparent group-hover:ring-indigo-500 transition">
+                        <div
+                          className={`w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-indigo-400 overflow-hidden transition ${
+                            c.is_admin
+                              ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
+                              : 'ring-2 ring-transparent group-hover:ring-indigo-500'
+                          }`}
+                        >
                           {c.avatar_url ? (
                             <img src={c.avatar_url} alt={c.username} className="w-full h-full object-cover" />
                           ) : (
@@ -843,7 +903,11 @@ export default function App() {
                           }`}
                         />
                       </div>
-                      <span className="text-[11px] truncate w-full text-center text-slate-400">
+                      <span
+                        className={`text-[11px] truncate w-full text-center ${
+                          c.is_admin ? 'text-amber-300 font-bold' : 'text-slate-400'
+                        }`}
+                      >
                         {c.username}
                       </span>
                     </button>
@@ -879,14 +943,18 @@ export default function App() {
                     className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition ${
                       selected
                         ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                        : info.isAdmin
+                        ? 'border border-amber-500/35 bg-amber-500/5 hover:bg-amber-500/10'
                         : 'hover:bg-slate-100 dark:hover:bg-slate-800/70'
                     }`}
                   >
                     <div className="relative shrink-0">
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm overflow-hidden ${
-                          selected ? 'bg-white/20 text-white' : 'bg-indigo-600/15 text-indigo-400'
-                        }`}
+                          info.isAdmin
+                            ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
+                            : ''
+                        } ${selected ? 'bg-white/20 text-white' : 'bg-indigo-600/15 text-indigo-400'}`}
                       >
                         {info.avatar ? (
                           <img src={info.avatar} alt={info.title} className="w-full h-full object-cover" />
@@ -907,7 +975,14 @@ export default function App() {
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-sm font-semibold truncate">{info.title}</p>
+                        <p className="text-sm font-semibold truncate">
+                          <AdminNameBadge
+                            name={info.title}
+                            isAdmin={info.isAdmin}
+                            lightText={selected}
+                            size="xs"
+                          />
+                        </p>
                         {conv.unread_count ? (
                           <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white">
                             {conv.unread_count}
@@ -930,13 +1005,23 @@ export default function App() {
 
           {/* Current User Profile Footer */}
           {me && (
-            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center justify-between gap-2">
+            <div
+              className={`p-3 border-t flex items-center justify-between gap-2 ${
+                me.is_admin
+                  ? 'border-amber-500/40 bg-gradient-to-r from-amber-500/10 via-slate-950 to-amber-500/5'
+                  : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60'
+              }`}
+            >
               <button
                 onClick={() => setShowProfileModal(true)}
                 className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-80 transition"
               >
                 <div className="relative shrink-0">
-                  <div className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs overflow-hidden">
+                  <div
+                    className={`w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs overflow-hidden ${
+                      me.is_admin ? 'ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.55)]' : ''
+                    }`}
+                  >
                     {me.avatar_url ? (
                       <img src={me.avatar_url} alt={me.username} className="w-full h-full object-cover" />
                     ) : (
@@ -946,13 +1031,8 @@ export default function App() {
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 absolute bottom-0 right-0 ring-2 ring-slate-950" />
                 </div>
                 <div className="truncate">
-                  <p className="text-xs font-semibold truncate flex items-center gap-1">
-                    {me.display_name}
-                    {me.is_admin && (
-                      <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400">
-                        ADMIN
-                      </span>
-                    )}
+                  <p className="text-xs font-semibold truncate">
+                    <AdminNameBadge name={me.display_name} isAdmin={me.is_admin} size="xs" />
                   </p>
                   <p className="text-[11px] text-slate-400 truncate">@{me.username}</p>
                 </div>
@@ -963,7 +1043,7 @@ export default function App() {
                   <button
                     onClick={openAdminPanel}
                     title="Bảng điều khiển Admin"
-                    className="p-2 rounded-lg hover:bg-amber-500/15 text-amber-400"
+                    className="p-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.25)]"
                   >
                     <Shield className="w-4 h-4" />
                   </button>
@@ -1038,7 +1118,13 @@ export default function App() {
                     const info = getConversationDisplay(activeConversation);
                     return (
                       <>
-                        <div className="w-10 h-10 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-sm overflow-hidden shrink-0">
+                        <div
+                          className={`w-10 h-10 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-sm overflow-hidden shrink-0 ${
+                            info.isAdmin
+                              ? 'ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
+                              : ''
+                          }`}
+                        >
                           {info.avatar ? (
                             <img src={info.avatar} alt={info.title} className="w-full h-full object-cover" />
                           ) : activeConversation.type === 'group' ? (
@@ -1048,7 +1134,9 @@ export default function App() {
                           )}
                         </div>
                         <div className="truncate">
-                          <h3 className="text-sm font-bold truncate">{info.title}</h3>
+                          <h3 className="text-sm font-bold truncate">
+                            <AdminNameBadge name={info.title} isAdmin={info.isAdmin} size="xs" />
+                          </h3>
                           <p className="text-xs text-slate-400 truncate">
                             {Object.keys(typingUsers).length > 0 ? (
                               <span className="text-indigo-400 font-medium">
@@ -1090,6 +1178,7 @@ export default function App() {
                 ) : (
                   messages.map((msg) => {
                     const isMine = msg.sender_id === sessionUserId;
+                    const senderIsAdmin = Boolean(msg.sender?.is_admin);
                     const senderName = msg.sender?.display_name || msg.sender?.username || 'User';
                     return (
                       <div
@@ -1097,7 +1186,13 @@ export default function App() {
                         className={`flex items-end gap-2.5 group ${isMine ? 'justify-end' : 'justify-start'}`}
                       >
                         {!isMine && (
-                          <div className="w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden">
+                          <div
+                            className={`w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden ${
+                              senderIsAdmin
+                                ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.55)]'
+                                : ''
+                            }`}
+                          >
                             {msg.sender?.avatar_url ? (
                               <img
                                 src={msg.sender.avatar_url}
@@ -1112,8 +1207,9 @@ export default function App() {
 
                         <div className={`max-w-[75%] sm:max-w-md ${isMine ? 'items-end' : 'items-start'} flex flex-col`}>
                           {!isMine && (
-                            <span className="text-[11px] text-slate-400 mb-1 ml-1">
-                              {senderName} <span className="opacity-60">@{msg.sender?.username}</span>
+                            <span className="text-[11px] text-slate-400 mb-1 ml-1 flex items-center gap-1.5">
+                              <AdminNameBadge name={senderName} isAdmin={senderIsAdmin} size="xs" />
+                              <span className="opacity-60">@{msg.sender?.username}</span>
                             </span>
                           )}
 
@@ -1122,7 +1218,11 @@ export default function App() {
                               msg.is_deleted
                                 ? 'bg-slate-800/40 text-slate-500 italic border border-slate-800'
                                 : isMine
-                                ? 'bg-indigo-600 text-white rounded-br-sm'
+                                ? senderIsAdmin
+                                  ? 'bg-gradient-to-br from-indigo-600 via-indigo-600 to-amber-600/80 text-white rounded-br-sm border border-amber-400/75 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+                                  : 'bg-indigo-600 text-white rounded-br-sm'
+                                : senderIsAdmin
+                                ? 'bg-white dark:bg-slate-900 border-2 border-amber-400/70 rounded-bl-sm shadow-[0_0_14px_rgba(245,158,11,0.18)]'
                                 : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-bl-sm'
                             }`}
                           >
@@ -1213,7 +1313,13 @@ export default function App() {
                 <>
                   <div className="flex flex-col items-center text-center pb-4 border-b border-slate-200 dark:border-slate-800">
                     <div className="relative group">
-                      <div className="w-16 h-16 rounded-2xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xl overflow-hidden">
+                      <div
+                        className={`w-16 h-16 rounded-2xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xl overflow-hidden ${
+                          info.isAdmin
+                            ? 'ring-2 ring-amber-400 shadow-[0_0_16px_rgba(251,191,36,0.5)]'
+                            : ''
+                        }`}
+                      >
                         {info.avatar ? (
                           <img src={info.avatar} alt={info.title} className="w-full h-full object-cover" />
                         ) : activeConversation.type === 'group' ? (
@@ -1234,7 +1340,9 @@ export default function App() {
                         </label>
                       )}
                     </div>
-                    <h4 className="font-bold text-sm mt-3">{info.title}</h4>
+                    <h4 className="font-bold text-sm mt-3 flex items-center justify-center">
+                      <AdminNameBadge name={info.title} isAdmin={info.isAdmin} size="xs" />
+                    </h4>
                     <p className="text-xs text-slate-400 mt-0.5">{info.subtitle}</p>
                     {info.otherUser?.bio && (
                       <p className="text-xs text-slate-400 mt-2 bg-slate-100 dark:bg-slate-950 p-2.5 rounded-xl w-full">
@@ -1288,7 +1396,11 @@ export default function App() {
                             return (
                               <div
                                 key={m.user_id}
-                                className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-950/60"
+                                className={`flex items-center justify-between p-2 rounded-xl ${
+                                  p?.is_admin
+                                    ? 'bg-amber-500/10 border border-amber-400/50'
+                                    : 'bg-slate-50 dark:bg-slate-950/60'
+                                }`}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span
@@ -1298,7 +1410,11 @@ export default function App() {
                                   />
                                   <div className="truncate">
                                     <p className="text-xs font-medium truncate">
-                                      {p?.display_name || p?.username}
+                                      <AdminNameBadge
+                                        name={p?.display_name || p?.username || 'User'}
+                                        isAdmin={p?.is_admin}
+                                        size="xs"
+                                      />
                                     </p>
                                     <p className="text-[10px] text-slate-400 capitalize">{m.role}</p>
                                   </div>
@@ -1336,10 +1452,10 @@ export default function App() {
         {/* ADMIN CONTROL PANEL MODAL */}
         {showAdminModal && me?.is_admin && (
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 flex flex-col max-h-[85vh]">
+            <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-amber-500/40 rounded-2xl p-6 flex flex-col max-h-[85vh]">
               <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-400/50 text-amber-300 flex items-center justify-center">
                     <Shield className="w-5 h-5" />
                   </div>
                   <div>
@@ -1386,10 +1502,18 @@ export default function App() {
                     return (
                       <div
                         key={u.id}
-                        className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
+                        className={`flex items-center justify-between gap-3 p-3 rounded-xl border ${
+                          u.is_admin
+                            ? 'bg-amber-500/5 border-amber-400/50'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800'
+                        }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                          <div
+                            className={`w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
+                              u.is_admin ? 'ring-2 ring-amber-400' : ''
+                            }`}
+                          >
                             {u.avatar_url ? (
                               <img src={u.avatar_url} alt={u.username} className="w-full h-full object-cover" />
                             ) : (
@@ -1398,12 +1522,9 @@ export default function App() {
                           </div>
                           <div className="truncate">
                             <div className="flex items-center gap-1.5">
-                              <p className="text-xs font-bold truncate">{u.display_name}</p>
-                              {u.is_admin && (
-                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400">
-                                  ADMIN
-                                </span>
-                              )}
+                              <p className="text-xs font-bold truncate">
+                                <AdminNameBadge name={u.display_name} isAdmin={u.is_admin} size="xs" />
+                              </p>
                               {u.is_banned && (
                                 <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-rose-500/20 text-rose-400">
                                   BỊ KHÓA
@@ -1423,7 +1544,7 @@ export default function App() {
                               onClick={() => handleToggleAdminRole(u)}
                               className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition ${
                                 u.is_admin
-                                  ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                                  ? 'bg-amber-500/15 text-amber-300 border border-amber-400/50 hover:bg-amber-500/25'
                                   : 'bg-slate-200 dark:bg-slate-800 text-slate-300 hover:bg-slate-700'
                               }`}
                             >
@@ -1579,7 +1700,11 @@ export default function App() {
               </div>
 
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xl overflow-hidden">
+                <div
+                  className={`w-16 h-16 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xl overflow-hidden ${
+                    me.is_admin ? 'ring-2 ring-amber-400 shadow-[0_0_16px_rgba(251,191,36,0.55)]' : ''
+                  }`}
+                >
                   {me.avatar_url ? (
                     <img src={me.avatar_url} alt={me.username} className="w-full h-full object-cover" />
                   ) : (
