@@ -559,7 +559,7 @@ export default function App() {
   if (!authReady) {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-400 text-sm">
-        Initializing PulseChat...
+        Initializing BocPhet...
       </div>
     );
   }
@@ -586,7 +586,7 @@ export default function App() {
               <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20">
                 <MessageSquare className="w-5 h-5" />
               </div>
-              <span className="font-bold text-base tracking-tight">PulseChat</span>
+              <span className="font-bold text-base tracking-tight">BocPhet Chat</span>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -847,7 +847,7 @@ export default function App() {
               <div className="w-16 h-16 rounded-2xl bg-indigo-600/15 text-indigo-400 flex items-center justify-center mb-4">
                 <MessageSquare className="w-8 h-8" />
               </div>
-              <h2 className="text-lg font-bold">Welcome to PulseChat</h2>
+              <h2 className="text-lg font-bold">Welcome to BocPhet Chat</h2>
               <p className="text-xs text-slate-400 max-w-sm mt-1.5 leading-relaxed">
                 Search any registered user by username in the sidebar to start a real-time private chat, or create a
                 group conversation with multiple friends.
