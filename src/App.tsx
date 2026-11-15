@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+
 import {
   Search,
   Plus,
@@ -34,6 +35,13 @@ export default function App() {
   const [me, setMe] = useState<Profile | null>(null);
 
   const [darkMode, setDarkMode] = useState(true);
+  useEffect(() => {
+  if (darkMode) {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
+}, [darkMode]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(true);
 
