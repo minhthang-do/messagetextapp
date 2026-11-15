@@ -127,7 +127,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
       setError('This OTP has expired (5-minute limit). Please click Resend Code.');
       return;
     }
-    if (otp.trim().length !== 6) {
+    if (otp.trim().length < 6) {
       setError('Please enter the 6-digit code from your email.');
       return;
     }
@@ -541,7 +541,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
                 <input
                   type="text"
                   inputMode="numeric"
-                  maxLength={6}
+                  maxLength={8}
                   required
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
