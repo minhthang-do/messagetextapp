@@ -1790,7 +1790,7 @@ export default function App() {
                             </span>
                           )}
 
-                          <div
+                        <div
                             className={`${
                               gifUrl ? 'p-1.5' : 'px-3.5 py-2.5'
                             } rounded-2xl text-sm leading-relaxed relative overflow-hidden ${
@@ -1798,10 +1798,10 @@ export default function App() {
                                 ? 'bg-slate-200/70 dark:bg-slate-800/40 text-slate-500 italic border border-slate-300 dark:border-slate-800'
                                 : isMine
                                 ? senderIsAdmin
-                                  ? 'bg-gradient-to-br from-indigo-600 via-indigo-600 to-amber-600/85 text-white rounded-br-sm border border-amber-400/75 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+                                  ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-950 dark:text-amber-100 rounded-br-sm border border-amber-400/80 dark:border-amber-500/50 shadow-sm'
                                   : 'bg-indigo-600 text-white rounded-br-sm'
                                 : senderIsAdmin
-                                ? 'bg-white dark:bg-slate-900 border-2 border-amber-400/70 rounded-bl-sm shadow-[0_0_14px_rgba(245,158,11,0.18)]'
+                                ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-950 dark:text-amber-100 rounded-bl-sm border border-amber-400/80 dark:border-amber-500/50 shadow-sm'
                                 : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-bl-sm'
                             }`}
                           >
@@ -1818,7 +1818,13 @@ export default function App() {
                             <div
                               className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
                                 gifUrl ? 'px-1.5 pb-0.5' : ''
-                              } ${isMine ? 'text-indigo-200' : 'text-slate-400'}`}
+                              } ${
+                                senderIsAdmin && !msg.is_deleted
+                                  ? 'text-amber-800/80 dark:text-amber-300/80'
+                                  : isMine
+                                  ? 'text-indigo-200'
+                                  : 'text-slate-400'
+                              }`}
                             >
                               <span>
                                 {new Date(msg.created_at).toLocaleTimeString([], {
