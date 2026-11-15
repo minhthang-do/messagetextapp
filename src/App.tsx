@@ -100,12 +100,21 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [me, setMe] = useState<Profile | null>(null);
 
-  const [darkMode, setDarkMode] = useState(true);
+ const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('bocphet_theme');
+    if (saved !== null) {
+      return saved === 'dark';
+    }
+    return true; // Mặc định là Dark Mode nếu chưa chọn gì
+  });
+
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('bocphet_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
+      localStorage.setItem('bocphet_theme', 'light');
     }
   }, [darkMode]);
 
