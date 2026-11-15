@@ -1,0 +1,8 @@
+{
+  "appId": "com.bocphet.chat",
+  "appName": "BocPhet Chat",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
