@@ -615,17 +615,32 @@ export default function App() {
         >
           {/* App Header */}
           <div className="h-16 px-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
+
+            
             <div className="flex items-center gap-2.5">
-              <div className="relative">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20">
-                  <MessageSquare className="w-5 h-5" />
-                </div>
-                {totalUnreadCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900">
-                    {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
-                  </span>
-                )}
-              </div>
+  <button
+    type="button"
+    onClick={() => setShowProfileModal(true)}
+    title="Cài đặt hồ sơ cá nhân"
+    className="relative group shrink-0 cursor-pointer"
+  >
+    <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-indigo-600/20 overflow-hidden ring-2 ring-transparent group-hover:ring-indigo-500 transition">
+      {me?.avatar_url ? (
+        <img src={me.avatar_url} alt={me.username} className="w-full h-full object-cover" />
+      ) : me?.username ? (
+        me.username[0].toUpperCase()
+      ) : (
+        <MessageSquare className="w-5 h-5" />
+      )}
+    </div>
+    {totalUnreadCount > 0 && (
+      <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900">
+        {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+      </span>
+    )}
+  </button>
+  <span className="font-bold text-base tracking-tight">BocPhet Chat</span>
+</div>
               <span className="font-bold text-base tracking-tight">BocPhet Chat</span>
             </div>
             <div className="flex items-center gap-1">
