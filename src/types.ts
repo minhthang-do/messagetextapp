@@ -10,6 +10,8 @@ export interface Profile {
   status: UserStatus;
   last_seen: string;
   created_at: string;
+  is_admin?: boolean;
+  is_banned?: boolean;
 }
 
 export interface ConversationMember {
