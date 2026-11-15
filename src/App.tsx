@@ -9,6 +9,7 @@ import {
   LogOut,
   Hash,
   UserPlus,
+  UserCheck,
   Trash2,
   Check,
   CheckCheck,
@@ -25,6 +26,14 @@ import {
   Ban,
   CheckCircle,
   Crown,
+  Pin,
+  Video,
+  VideoOff,
+  Mic,
+  MicOff,
+  PhoneOff,
+  PhoneIncoming,
+  Edit3,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { AuthScreen } from './components/AuthScreen';
@@ -32,7 +41,14 @@ import { Conversation, Message, Profile, UserStatus } from './types';
 
 const EMOJIS = ['😀', '😂', '🔥', '❤️', '👍', '🎉', '🚀', '🙌', '😎', '🤔', '💯', '✨', '👏', '🥳', '💡', '🤝'];
 
-// Component hiển thị Tên + Huy hiệu Vương miện & Viền vàng nổi bật cho Admin
+const ICE_SERVERS: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+};
+
+// Component hiển thị Tên + Huy hiệu Vương miện & Viền vàng tương thích cả Light Mode lẫn Dark Mode
 function AdminNameBadge({
   name,
   isAdmin,
@@ -54,17 +70,25 @@ function AdminNameBadge({
         className={`font-extrabold truncate ${
           lightText
             ? 'text-amber-200 drop-shadow-[0_0_8px_rgba(251,191,36,0.65)]'
-            : 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_6px_rgba(245,158,11,0.35)]'
+            : 'bg-gradient-to-r from-amber-600 via-yellow-600 to-amber-700 dark:from-amber-300 dark:via-yellow-400 dark:to-amber-500 bg-clip-text text-transparent'
         }`}
       >
         {name}
       </span>
       <span
-        className={`inline-flex items-center gap-0.5 rounded-full font-extrabold uppercase tracking-wider shrink-0 border border-amber-400/80 bg-gradient-to-r from-amber-500/25 to-yellow-500/20 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.35)] ${
-          size === 'xs' ? 'px-1.5 py-0 text-[9px]' : 'px-2 py-0.5 text-[10px]'
-        }`}
+        className={`inline-flex items-center gap-0.5 rounded-full font-extrabold uppercase tracking-wider shrink-0 border ${
+          lightText
+            ? 'border-amber-300/80 bg-amber-500/30 text-amber-100'
+            : 'border-amber-500/70 dark:border-amber-400/80 bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+        } ${size === 'xs' ? 'px-1.5 py-0 text-[9px]' : 'px-2 py-0.5 text-[10px]'}`}
       >
-        <Crown className={size === 'xs' ? 'w-2.5 h-2.5 text-amber-300 fill-amber-400/40' : 'w-3 h-3 text-amber-300 fill-amber-400/40'} />
+        <Crown
+          className={
+            size === 'xs'
+              ? 'w-2.5 h-2.5 text-amber-600 dark:text-amber-300 fill-amber-400/40'
+              : 'w-3 h-3 text-amber-600 dark:text-amber-300 fill-amber-400/40'
+          }
+        />
         ADMIN
       </span>
     </span>
@@ -101,7 +125,7 @@ export default function App() {
   const [messageInput, setMessageInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
-  // Search & Contacts
+  // Search & Contacts (Friends)
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
   const [contacts, setContacts] = useState<Profile[]>([]);
@@ -111,6 +135,7 @@ export default function App() {
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const typingTimeoutRef = useRef<number | null>(null);
   const channelRef = useRef<any>(null);
+  const callSignalChannelRef = useRef<any>(null);
 
   // Modals
   const [showNewGroupModal, setShowNewGroupModal] = useState(false);
@@ -121,6 +146,13 @@ export default function App() {
   const [editBio, setEditBio] = useState('');
   const [editStatus, setEditStatus] = useState<UserStatus>('online');
 
+  // Group Management States
+  const [addMemberQuery, setAddMemberQuery] = useState('');
+  const [addMemberResults, setAddMemberResults] = useState<Profile[]>([]);
+  const [groupBannedUsers, setGroupBannedUsers] = useState<Profile[]>([]);
+  const [editingGroupName, setEditingGroupName] = useState(false);
+  const [newGroupNameInput, setNewGroupNameInput] = useState('');
+
   // Admin Panel Modal
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminUsers, setAdminUsers] = useState<Profile[]>([]);
@@ -128,22 +160,53 @@ export default function App() {
   const [adminTab, setAdminTab] = useState<'users' | 'groups'>('users');
   const [adminLoading, setAdminLoading] = useState(false);
 
-  // Add Member to existing group
-  const [addMemberQuery, setAddMemberQuery] = useState('');
-  const [addMemberResults, setAddMemberResults] = useState<Profile[]>([]);
+  // WebRTC Video Call States
+  const [callState, setCallState] = useState<'idle' | 'calling' | 'ringing' | 'connected'>('idle');
+  const [callPeer, setCallPeer] = useState<{
+    userId: string;
+    name: string;
+    avatar: string | null;
+    convId: string;
+  } | null>(null);
+  const [incomingOffer, setIncomingOffer] = useState<RTCSessionDescriptionInit | null>(null);
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [camEnabled, setCamEnabled] = useState(true);
+
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Tổng số tin nhắn chưa đọc trên toàn bộ cuộc trò chuyện
+  // Tổng số tin nhắn chưa đọc
   const totalUnreadCount = useMemo(
     () => conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0),
     [conversations]
   );
 
-  // Cập nhật số tin nhắn chưa đọc lên tiêu đề tab trình duyệt
   useEffect(() => {
     document.title = totalUnreadCount > 0 ? `(${totalUnreadCount}) BocPhet Chat` : 'BocPhet Chat';
   }, [totalUnreadCount]);
+
+  // Sắp xếp bạn bè: người được ghim (is_pinned) lên trước
+  const sortedContacts = useMemo(() => {
+    return [...contacts].sort((a, b) => Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned)));
+  }, [contacts]);
+
+  // Sắp xếp hội thoại: ưu tiên cuộc trò chuyện trực tiếp với bạn đã ghim lên đầu
+  const sortedConversations = useMemo(() => {
+    const pinnedIds = new Set(contacts.filter((c) => c.is_pinned).map((c) => c.id));
+    return [...conversations].sort((a, b) => {
+      const aOther = a.type === 'direct' ? a.members?.find((m) => m.user_id !== sessionUserId)?.user_id : null;
+      const bOther = b.type === 'direct' ? b.members?.find((m) => m.user_id !== sessionUserId)?.user_id : null;
+      const aPinned = aOther && pinnedIds.has(aOther) ? 1 : 0;
+      const bPinned = bOther && pinnedIds.has(bOther) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+    });
+  }, [conversations, contacts, sessionUserId]);
 
   // 1. Auth Session Listener
   useEffect(() => {
@@ -178,14 +241,17 @@ export default function App() {
       setEditStatus(profile.status || 'online');
     }
 
-    // Load contacts
     const { data: contactRows } = await supabase
       .from('contacts')
-      .select('contact_id, profiles!contacts_contact_id_fkey(*)')
+      .select('contact_id, is_pinned, profiles!contacts_contact_id_fkey(*)')
       .eq('user_id', uid);
 
     if (contactRows) {
-      setContacts(contactRows.map((r: any) => r.profiles).filter(Boolean));
+      setContacts(
+        contactRows
+          .filter((r: any) => r.profiles)
+          .map((r: any) => ({ ...r.profiles, is_pinned: Boolean(r.is_pinned) }))
+      );
     }
 
     await loadConversations(uid);
@@ -238,7 +304,7 @@ export default function App() {
     loadMyData(sessionUserId);
   }, [sessionUserId]);
 
-  // 3. Global Realtime Presence & Database Change Subscriptions
+  // 3. Global Realtime Presence, Database Sync & WebRTC Call Signaling
   useEffect(() => {
     if (!sessionUserId || !me) return;
 
@@ -284,6 +350,45 @@ export default function App() {
       })
       .subscribe();
 
+    // Kênh tín hiệu Video Call riêng của từng người dùng
+    const callChannel = supabase.channel(`webrtc-call:${sessionUserId}`);
+    callSignalChannelRef.current = callChannel;
+
+    callChannel
+      .on('broadcast', { event: 'call-offer' }, ({ payload }) => {
+        if (pcRef.current) return; // Đang bận cuộc gọi khác
+        setCallPeer({
+          userId: payload.fromUserId,
+          name: payload.fromName,
+          avatar: payload.fromAvatar || null,
+          convId: payload.convId,
+        });
+        setIncomingOffer(payload.offer);
+        setCallState('ringing');
+      })
+      .on('broadcast', { event: 'call-answer' }, async ({ payload }) => {
+        if (pcRef.current && payload.answer) {
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(payload.answer));
+          for (const cand of pendingCandidatesRef.current) {
+            await pcRef.current.addIceCandidate(new RTCIceCandidate(cand));
+          }
+          pendingCandidatesRef.current = [];
+          setCallState('connected');
+        }
+      })
+      .on('broadcast', { event: 'ice-candidate' }, async ({ payload }) => {
+        if (!payload.candidate) return;
+        if (pcRef.current && pcRef.current.remoteDescription) {
+          await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        } else {
+          pendingCandidatesRef.current.push(payload.candidate);
+        }
+      })
+      .on('broadcast', { event: 'call-end' }, () => {
+        cleanupVideoCall();
+      })
+      .subscribe();
+
     const handleBeforeUnload = () => {
       supabase
         .from('profiles')
@@ -296,19 +401,35 @@ export default function App() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       supabase.removeChannel(presenceChannel);
       supabase.removeChannel(dbSub);
+      supabase.removeChannel(callChannel);
     };
   }, [sessionUserId, me?.id]);
 
-  // 4. Active Conversation Messages & Typing Channel
+  // 4. Active Conversation Messages, Group Bans & Typing Channel
+  const loadGroupBans = async (convId: string) => {
+    const { data } = await supabase
+      .from('group_bans')
+      .select('user_id, profiles!group_bans_user_id_fkey(*)')
+      .eq('conversation_id', convId);
+
+    if (data) {
+      setGroupBannedUsers(data.map((r: any) => r.profiles).filter(Boolean));
+    } else {
+      setGroupBannedUsers([]);
+    }
+  };
+
   useEffect(() => {
     if (!activeConvId || !sessionUserId) {
       setMessages([]);
+      setGroupBannedUsers([]);
       return;
     }
 
     let isMounted = true;
     setLoadingMessages(true);
     setTypingUsers({});
+    setEditingGroupName(false);
 
     const fetchMessages = async () => {
       const { data } = await supabase
@@ -326,6 +447,7 @@ export default function App() {
     };
 
     fetchMessages();
+    loadGroupBans(activeConvId);
 
     const roomChannel = supabase.channel(`room:${activeConvId}`);
     channelRef.current = roomChannel;
@@ -394,6 +516,159 @@ export default function App() {
       .eq('user_id', sessionUserId);
 
     setConversations((prev) => prev.map((c) => (c.id === convId ? { ...c, unread_count: 0 } : c)));
+  };
+
+  // WebRTC Video Call Helpers
+  const sendCallSignal = async (targetUserId: string, event: string, payload: any) => {
+    const ch = supabase.channel(`webrtc-call:${targetUserId}`);
+    await ch.subscribe();
+    await ch.send({
+      type: 'broadcast',
+      event,
+      payload,
+    });
+    setTimeout(() => supabase.removeChannel(ch), 1500);
+  };
+
+  const cleanupVideoCall = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    pendingCandidatesRef.current = [];
+    setIncomingOffer(null);
+    setCallPeer(null);
+    setCallState('idle');
+    setMicEnabled(true);
+    setCamEnabled(true);
+  };
+
+  const startVideoCall = async (targetUser: Profile, convId: string) => {
+    if (!me || !sessionUserId) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+
+      setCallPeer({
+        userId: targetUser.id,
+        name: targetUser.display_name || targetUser.username,
+        avatar: targetUser.avatar_url,
+        convId,
+      });
+      setCallState('calling');
+
+      setTimeout(() => {
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+      }, 100);
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      pcRef.current = pc;
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        if (remoteVideoRef.current && event.streams[0]) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          sendCallSignal(targetUser.id, 'ice-candidate', {
+            candidate: event.candidate.toJSON(),
+          });
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await sendCallSignal(targetUser.id, 'call-offer', {
+        fromUserId: sessionUserId,
+        fromName: me.display_name || me.username,
+        fromAvatar: me.avatar_url,
+        convId,
+        offer,
+      });
+    } catch {
+      alert('Không thể truy cập Camera hoặc Micro. Vui lòng cấp quyền trình duyệt và thử lại.');
+      cleanupVideoCall();
+    }
+  };
+
+  const acceptIncomingCall = async () => {
+    if (!callPeer || !incomingOffer || !sessionUserId) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+      setCallState('connected');
+
+      setTimeout(() => {
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+      }, 100);
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      pcRef.current = pc;
+
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        if (remoteVideoRef.current && event.streams[0]) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          sendCallSignal(callPeer.userId, 'ice-candidate', {
+            candidate: event.candidate.toJSON(),
+          });
+        }
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingOffer));
+      for (const cand of pendingCandidatesRef.current) {
+        await pc.addIceCandidate(new RTCIceCandidate(cand));
+      }
+      pendingCandidatesRef.current = [];
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await sendCallSignal(callPeer.userId, 'call-answer', { answer });
+    } catch {
+      alert('Không thể truy cập Camera/Micro để nhận cuộc gọi.');
+      endVideoCall();
+    }
+  };
+
+  const endVideoCall = async () => {
+    if (callPeer) {
+      await sendCallSignal(callPeer.userId, 'call-end', {});
+    }
+    cleanupVideoCall();
+  };
+
+  const toggleMic = () => {
+    if (!localStreamRef.current) return;
+    const next = !micEnabled;
+    localStreamRef.current.getAudioTracks().forEach((t) => (t.enabled = next));
+    setMicEnabled(next);
+  };
+
+  const toggleCam = () => {
+    if (!localStreamRef.current) return;
+    const next = !camEnabled;
+    localStreamRef.current.getVideoTracks().forEach((t) => (t.enabled = next));
+    setCamEnabled(next);
   };
 
   // Admin Panel Data Loader
@@ -515,6 +790,7 @@ export default function App() {
     }
   };
 
+  // Add / Remove Friend
   const toggleContact = async (targetUser: Profile) => {
     if (!sessionUserId) return;
     const exists = contacts.some((c) => c.id === targetUser.id);
@@ -522,9 +798,35 @@ export default function App() {
       await supabase.from('contacts').delete().eq('user_id', sessionUserId).eq('contact_id', targetUser.id);
       setContacts((prev) => prev.filter((c) => c.id !== targetUser.id));
     } else {
-      await supabase.from('contacts').insert({ user_id: sessionUserId, contact_id: targetUser.id });
-      setContacts((prev) => [...prev, targetUser]);
+      await supabase
+        .from('contacts')
+        .insert({ user_id: sessionUserId, contact_id: targetUser.id, is_pinned: false });
+      setContacts((prev) => [...prev, { ...targetUser, is_pinned: false }]);
     }
+  };
+
+  // Pin / Unpin Friend
+  const togglePinContact = async (targetUser: Profile) => {
+    if (!sessionUserId) return;
+    const existing = contacts.find((c) => c.id === targetUser.id);
+    if (!existing) {
+      // Nếu chưa kết bạn thì tự động kết bạn và ghim luôn
+      await supabase
+        .from('contacts')
+        .insert({ user_id: sessionUserId, contact_id: targetUser.id, is_pinned: true });
+      setContacts((prev) => [...prev, { ...targetUser, is_pinned: true }]);
+      return;
+    }
+    const nextPinned = !existing.is_pinned;
+    await supabase
+      .from('contacts')
+      .update({ is_pinned: nextPinned })
+      .eq('user_id', sessionUserId)
+      .eq('contact_id', targetUser.id);
+
+    setContacts((prev) =>
+      prev.map((c) => (c.id === targetUser.id ? { ...c, is_pinned: nextPinned } : c))
+    );
   };
 
   const handleTyping = (val: string) => {
@@ -607,8 +909,24 @@ export default function App() {
     }
   };
 
+  // Group Owner / Admin Actions
+  const handleRenameGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeConvId || !sessionUserId || !newGroupNameInput.trim()) return;
+    await supabase
+      .from('conversations')
+      .update({ name: newGroupNameInput.trim() })
+      .eq('id', activeConvId);
+    setEditingGroupName(false);
+    await loadConversations(sessionUserId);
+  };
+
   const handleAddMemberToGroup = async (userId: string) => {
     if (!activeConvId) return;
+    if (groupBannedUsers.some((b) => b.id === userId)) {
+      alert('Người dùng này đang nằm trong danh sách bị cấm (Ban) của nhóm. Hãy gỡ Ban trước khi thêm lại.');
+      return;
+    }
     await supabase.from('conversation_members').insert({
       conversation_id: activeConvId,
       user_id: userId,
@@ -628,6 +946,53 @@ export default function App() {
     if (userId === sessionUserId) {
       setActiveConvId(null);
     }
+    await loadConversations(sessionUserId);
+  };
+
+  const handleBanMemberFromGroup = async (targetUser: Profile) => {
+    if (!activeConvId || !sessionUserId) return;
+    if (!window.confirm(`Cấm (Ban) @${targetUser.username} khỏi nhóm này?`)) return;
+
+    await supabase.from('group_bans').upsert({
+      conversation_id: activeConvId,
+      user_id: targetUser.id,
+      banned_by: sessionUserId,
+    });
+    await supabase
+      .from('conversation_members')
+      .delete()
+      .eq('conversation_id', activeConvId)
+      .eq('user_id', targetUser.id);
+
+    await Promise.all([loadConversations(sessionUserId), loadGroupBans(activeConvId)]);
+  };
+
+  const handleUnbanMemberFromGroup = async (userId: string) => {
+    if (!activeConvId) return;
+    await supabase
+      .from('group_bans')
+      .delete()
+      .eq('conversation_id', activeConvId)
+      .eq('user_id', userId);
+    await loadGroupBans(activeConvId);
+  };
+
+  const handleToggleGroupMemberRole = async (userId: string, currentRole: 'owner' | 'admin' | 'member') => {
+    if (!activeConvId || !sessionUserId || currentRole === 'owner') return;
+    const nextRole = currentRole === 'admin' ? 'member' : 'admin';
+    await supabase
+      .from('conversation_members')
+      .update({ role: nextRole })
+      .eq('conversation_id', activeConvId)
+      .eq('user_id', userId);
+    await loadConversations(sessionUserId);
+  };
+
+  const handleDeleteCurrentGroup = async () => {
+    if (!activeConvId || !sessionUserId) return;
+    if (!window.confirm('Bạn có chắc muốn xóa vĩnh viễn nhóm chat này? Toàn bộ tin nhắn sẽ bị xóa.')) return;
+    await supabase.from('conversations').delete().eq('id', activeConvId);
+    setActiveConvId(null);
     await loadConversations(sessionUserId);
   };
 
@@ -701,10 +1066,12 @@ export default function App() {
         avatar: conv.avatar_url,
         online: false,
         isAdmin: false,
+        isPinned: false,
       };
     }
     const other = conv.members?.find((m) => m.user_id !== sessionUserId)?.profile;
     const isOnline = other ? onlineUserIds.has(other.id) || other.status === 'online' : false;
+    const friendRecord = other ? contacts.find((c) => c.id === other.id) : undefined;
     return {
       title: other?.display_name || other?.username || 'Direct Message',
       subtitle: other ? `@${other.username}` : '',
@@ -712,6 +1079,8 @@ export default function App() {
       online: isOnline,
       otherUser: other,
       isAdmin: Boolean(other?.is_admin),
+      isPinned: Boolean(friendRecord?.is_pinned),
+      isFriend: Boolean(friendRecord),
     };
   };
 
@@ -728,8 +1097,11 @@ export default function App() {
   }
 
   const myMembership = activeConversation?.members?.find((m) => m.user_id === sessionUserId);
-  const isGroupAdmin =
-    Boolean(me?.is_admin) || myMembership?.role === 'owner' || myMembership?.role === 'admin';
+  const isGroupOwner =
+    Boolean(me?.is_admin) ||
+    activeConversation?.created_by === sessionUserId ||
+    myMembership?.role === 'owner';
+  const isGroupAdmin = isGroupOwner || myMembership?.role === 'admin';
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -752,7 +1124,7 @@ export default function App() {
                 <div
                   className={`w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm overflow-hidden transition ${
                     me?.is_admin
-                      ? 'ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
+                      ? 'ring-2 ring-amber-500 dark:ring-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.45)]'
                       : 'shadow-md shadow-indigo-600/20 ring-2 ring-transparent group-hover:ring-indigo-500'
                   }`}
                 >
@@ -776,14 +1148,14 @@ export default function App() {
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowNewGroupModal(true)}
-                title="Create Group Chat"
+                title="Tạo nhóm chat mới"
                 className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
               >
                 <Plus className="w-5 h-5" />
               </button>
               <button
                 onClick={() => setDarkMode(!darkMode)}
-                title="Toggle Theme"
+                title="Đổi giao diện Sáng / Tối"
                 className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
               >
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -791,7 +1163,7 @@ export default function App() {
               {mobileMenuOpen && (
                 <button
                   onClick={() => setMobileMenuOpen(false)}
-                  className="md:hidden p-2 rounded-lg hover:bg-slate-800"
+                  className="md:hidden p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -807,7 +1179,7 @@ export default function App() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search users by @username..."
+                placeholder="Tìm bạn bè qua @username..."
                 className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs outline-none focus:border-indigo-500"
               />
             </div>
@@ -815,13 +1187,14 @@ export default function App() {
             {searchQuery.trim() && (
               <div className="mt-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-1.5 space-y-1 max-h-56 overflow-y-auto">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-2 py-1">
-                  Matching Users
+                  Kết quả tìm kiếm
                 </p>
                 {searchResults.length === 0 ? (
-                  <p className="text-xs text-slate-500 px-2 py-2">No users found matching "{searchQuery}"</p>
+                  <p className="text-xs text-slate-500 px-2 py-2">Không tìm thấy "{searchQuery}"</p>
                 ) : (
                   searchResults.map((u) => {
-                    const isContact = contacts.some((c) => c.id === u.id);
+                    const friendObj = contacts.find((c) => c.id === u.id);
+                    const isContact = Boolean(friendObj);
                     return (
                       <div
                         key={u.id}
@@ -832,8 +1205,8 @@ export default function App() {
                           className="flex items-center gap-2.5 text-left flex-1 min-w-0"
                         >
                           <div
-                            className={`w-8 h-8 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
-                              u.is_admin ? 'ring-2 ring-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.45)]' : ''
+                            className={`w-8 h-8 rounded-full bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
+                              u.is_admin ? 'ring-2 ring-amber-400' : ''
                             }`}
                           >
                             {u.avatar_url ? (
@@ -846,20 +1219,34 @@ export default function App() {
                             <p className="text-xs font-semibold truncate">
                               <AdminNameBadge name={u.display_name} isAdmin={u.is_admin} size="xs" />
                             </p>
-                            <p className="text-[11px] text-slate-400 truncate">@{u.username}</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">@{u.username}</p>
                           </div>
                         </button>
-                        <button
-                          onClick={() => toggleContact(u)}
-                          title={isContact ? 'Remove Contact' : 'Add Contact'}
-                          className={`p-1.5 rounded-lg text-xs ${
-                            isContact
-                              ? 'text-emerald-400 bg-emerald-500/10'
-                              : 'text-slate-400 hover:bg-slate-800'
-                          }`}
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                        </button>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => togglePinContact(u)}
+                            title={friendObj?.is_pinned ? 'Bỏ ghim bạn bè' : 'Ghim bạn bè lên đầu'}
+                            className={`p-1.5 rounded-lg text-xs transition ${
+                              friendObj?.is_pinned
+                                ? 'text-amber-600 dark:text-amber-400 bg-amber-500/15'
+                                : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            <Pin className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => toggleContact(u)}
+                            title={isContact ? 'Hủy kết bạn' : 'Kết bạn'}
+                            className={`p-1.5 rounded-lg text-xs transition ${
+                              isContact
+                                ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/15'
+                                : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {isContact ? <UserCheck className="w-3.5 h-3.5" /> : <UserPlus className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
                       </div>
                     );
                   })
@@ -868,49 +1255,68 @@ export default function App() {
             )}
           </div>
 
-          {/* Contacts Strip */}
-          {contacts.length > 0 && (
+          {/* Friends / Contacts Strip (Pinned first) */}
+          {sortedContacts.length > 0 && (
             <div className="px-3 py-2.5 border-b border-slate-200 dark:border-slate-800">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">
-                Contacts ({contacts.length})
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                Bạn bè ({sortedContacts.length})
               </p>
               <div className="flex gap-2 overflow-x-auto pb-1">
-                {contacts.map((c) => {
+                {sortedContacts.map((c) => {
                   const online = onlineUserIds.has(c.id) || c.status === 'online';
                   return (
-                    <button
-                      key={c.id}
-                      onClick={() => startDirectChat(c)}
-                      className="flex flex-col items-center gap-1 shrink-0 w-14 group"
-                    >
-                      <div className="relative">
-                        <div
-                          className={`w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold text-indigo-400 overflow-hidden transition ${
-                            c.is_admin
-                              ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
-                              : 'ring-2 ring-transparent group-hover:ring-indigo-500'
-                          }`}
-                        >
-                          {c.avatar_url ? (
-                            <img src={c.avatar_url} alt={c.username} className="w-full h-full object-cover" />
-                          ) : (
-                            c.username[0].toUpperCase()
-                          )}
-                        </div>
-                        <span
-                          className={`w-2.5 h-2.5 rounded-full absolute bottom-0 right-0 ring-2 ring-slate-900 ${
-                            online ? 'bg-emerald-500' : 'bg-slate-500'
-                          }`}
-                        />
-                      </div>
-                      <span
-                        className={`text-[11px] truncate w-full text-center ${
-                          c.is_admin ? 'text-amber-300 font-bold' : 'text-slate-400'
+                    <div key={c.id} className="relative flex flex-col items-center gap-1 shrink-0 w-14 group">
+                      <button
+                        type="button"
+                        onClick={() => togglePinContact(c)}
+                        title={c.is_pinned ? 'Bỏ ghim bạn bè' : 'Ghim bạn bè'}
+                        className={`absolute -top-1 left-0.5 z-10 p-0.5 rounded-full transition ${
+                          c.is_pinned
+                            ? 'bg-amber-500 text-white opacity-100 shadow'
+                            : 'bg-slate-700/80 text-slate-200 opacity-0 group-hover:opacity-100'
                         }`}
                       >
-                        {c.username}
-                      </span>
-                    </button>
+                        <Pin className="w-2.5 h-2.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => startDirectChat(c)}
+                        className="flex flex-col items-center gap-1 w-full"
+                      >
+                        <div className="relative">
+                          <div
+                            className={`w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-indigo-600 dark:text-indigo-400 overflow-hidden transition ${
+                              c.is_admin
+                                ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
+                                : c.is_pinned
+                                ? 'ring-2 ring-indigo-500'
+                                : 'ring-2 ring-transparent group-hover:ring-indigo-500'
+                            }`}
+                          >
+                            {c.avatar_url ? (
+                              <img src={c.avatar_url} alt={c.username} className="w-full h-full object-cover" />
+                            ) : (
+                              c.username[0].toUpperCase()
+                            )}
+                          </div>
+                          <span
+                            className={`w-2.5 h-2.5 rounded-full absolute bottom-0 right-0 ring-2 ring-white dark:ring-slate-900 ${
+                              online ? 'bg-emerald-500' : 'bg-slate-400 dark:bg-slate-500'
+                            }`}
+                          />
+                        </div>
+                        <span
+                          className={`text-[11px] truncate w-full text-center ${
+                            c.is_admin
+                              ? 'text-amber-700 dark:text-amber-300 font-bold'
+                              : 'text-slate-600 dark:text-slate-400'
+                          }`}
+                        >
+                          {c.username}
+                        </span>
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -919,18 +1325,18 @@ export default function App() {
 
           {/* Conversation List */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 px-2 py-1.5">
-              Direct & Group Chats
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 px-2 py-1.5">
+              Trò chuyện & Nhóm
             </p>
-            {conversations.length === 0 ? (
+            {sortedConversations.length === 0 ? (
               <div className="text-center py-10 px-4">
-                <p className="text-xs text-slate-500">No conversations yet.</p>
+                <p className="text-xs text-slate-500">Chưa có cuộc trò chuyện nào.</p>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Search a username above or click + to create a group chat.
+                  Tìm username ở ô trên hoặc bấm dấu + để tạo nhóm mới.
                 </p>
               </div>
             ) : (
-              conversations.map((conv) => {
+              sortedConversations.map((conv) => {
                 const info = getConversationDisplay(conv);
                 const selected = conv.id === activeConvId;
                 return (
@@ -944,17 +1350,19 @@ export default function App() {
                       selected
                         ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
                         : info.isAdmin
-                        ? 'border border-amber-500/35 bg-amber-500/5 hover:bg-amber-500/10'
+                        ? 'border border-amber-500/40 bg-amber-50/70 dark:bg-amber-500/5 hover:bg-amber-100/70 dark:hover:bg-amber-500/10'
                         : 'hover:bg-slate-100 dark:hover:bg-slate-800/70'
                     }`}
                   >
                     <div className="relative shrink-0">
                       <div
                         className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm overflow-hidden ${
-                          info.isAdmin
-                            ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]'
-                            : ''
-                        } ${selected ? 'bg-white/20 text-white' : 'bg-indigo-600/15 text-indigo-400'}`}
+                          info.isAdmin ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.45)]' : ''
+                        } ${
+                          selected
+                            ? 'bg-white/20 text-white'
+                            : 'bg-indigo-600/15 text-indigo-600 dark:text-indigo-400'
+                        }`}
                       >
                         {info.avatar ? (
                           <img src={info.avatar} alt={info.title} className="w-full h-full object-cover" />
@@ -968,14 +1376,14 @@ export default function App() {
                         <span
                           className={`w-2.5 h-2.5 rounded-full absolute bottom-0 right-0 ring-2 ${
                             selected ? 'ring-indigo-600' : 'ring-white dark:ring-slate-900'
-                          } ${info.online ? 'bg-emerald-400' : 'bg-slate-500'}`}
+                          } ${info.online ? 'bg-emerald-400' : 'bg-slate-400 dark:bg-slate-500'}`}
                         />
                       )}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <p className="text-sm font-semibold truncate">
+                        <p className="text-sm font-semibold truncate flex items-center gap-1">
                           <AdminNameBadge
                             name={info.title}
                             isAdmin={info.isAdmin}
@@ -983,15 +1391,20 @@ export default function App() {
                             size="xs"
                           />
                         </p>
-                        {conv.unread_count ? (
-                          <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white">
-                            {conv.unread_count}
-                          </span>
-                        ) : null}
+                        <div className="flex items-center gap-1 shrink-0">
+                          {info.isPinned && (
+                            <Pin className={`w-3 h-3 ${selected ? 'text-amber-200' : 'text-amber-500'}`} />
+                          )}
+                          {conv.unread_count ? (
+                            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white">
+                              {conv.unread_count}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <p
                         className={`text-xs truncate mt-0.5 ${
-                          selected ? 'text-indigo-100' : 'text-slate-400'
+                          selected ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'
                         }`}
                       >
                         {conv.last_message_text || info.subtitle}
@@ -1003,23 +1416,25 @@ export default function App() {
             )}
           </div>
 
-          {/* Current User Profile Footer */}
+          {/* Current User Profile Footer (Fixed Light Mode & Dark Mode Contrast) */}
           {me && (
             <div
-              className={`p-3 border-t flex items-center justify-between gap-2 ${
+              className={`p-3 border-t flex items-center justify-between gap-2 transition-colors ${
                 me.is_admin
-                  ? 'border-amber-500/40 bg-gradient-to-r from-amber-500/10 via-slate-950 to-amber-500/5'
-                  : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60'
+                  ? 'border-amber-400/60 dark:border-amber-500/40 bg-gradient-to-r from-amber-100/90 via-amber-50 to-yellow-100/80 dark:from-amber-500/15 dark:via-slate-950 dark:to-amber-500/10'
+                  : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/80'
               }`}
             >
               <button
                 onClick={() => setShowProfileModal(true)}
-                className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-80 transition"
+                className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-85 transition"
               >
                 <div className="relative shrink-0">
                   <div
                     className={`w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xs overflow-hidden ${
-                      me.is_admin ? 'ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.55)]' : ''
+                      me.is_admin
+                        ? 'ring-2 ring-amber-500 dark:ring-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.45)]'
+                        : ''
                     }`}
                   >
                     {me.avatar_url ? (
@@ -1028,37 +1443,37 @@ export default function App() {
                       me.username[0].toUpperCase()
                     )}
                   </div>
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 absolute bottom-0 right-0 ring-2 ring-slate-950" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 absolute bottom-0 right-0 ring-2 ring-white dark:ring-slate-950" />
                 </div>
                 <div className="truncate">
                   <p className="text-xs font-semibold truncate">
                     <AdminNameBadge name={me.display_name} isAdmin={me.is_admin} size="xs" />
                   </p>
-                  <p className="text-[11px] text-slate-400 truncate">@{me.username}</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 truncate">@{me.username}</p>
                 </div>
               </button>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 {me.is_admin && (
                   <button
                     onClick={openAdminPanel}
                     title="Bảng điều khiển Admin"
-                    className="p-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.25)]"
+                    className="p-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/60 dark:border-amber-400/50 text-amber-700 dark:text-amber-300 shadow-sm"
                   >
                     <Shield className="w-4 h-4" />
                   </button>
                 )}
                 <button
                   onClick={() => setShowProfileModal(true)}
-                  title="Account Settings"
-                  className="p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400"
+                  title="Cài đặt tài khoản"
+                  className="p-2 rounded-lg hover:bg-slate-200/80 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
                 >
                   <Settings className="w-4 h-4" />
                 </button>
                 <button
                   onClick={handleLogout}
-                  title="Log Out"
-                  className="p-2 rounded-lg hover:bg-rose-500/10 text-rose-400"
+                  title="Đăng xuất"
+                  className="p-2 rounded-lg hover:bg-rose-500/15 text-rose-600 dark:text-rose-400"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -1075,7 +1490,7 @@ export default function App() {
                 onClick={() => setMobileMenuOpen(true)}
                 className="md:hidden mb-6 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium relative"
               >
-                Open Chats & Search
+                Mở danh sách trò chuyện
                 {totalUnreadCount > 0 && (
                   <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white">
                     {totalUnreadCount}
@@ -1083,7 +1498,7 @@ export default function App() {
                 )}
               </button>
               <div className="relative mb-4">
-                <div className="w-16 h-16 rounded-2xl bg-indigo-600/15 text-indigo-400 flex items-center justify-center">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
                   <MessageSquare className="w-8 h-8" />
                 </div>
                 {totalUnreadCount > 0 && (
@@ -1092,10 +1507,9 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <h2 className="text-lg font-bold">Welcome to BocPhet Chat</h2>
-              <p className="text-xs text-slate-400 max-w-sm mt-1.5 leading-relaxed">
-                Search any registered user by username in the sidebar to start a real-time private chat, or create a
-                group conversation with multiple friends.
+              <h2 className="text-lg font-bold">Chào mừng đến với BocPhet Chat</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mt-1.5 leading-relaxed">
+                Tìm kiếm bạn bè qua username ở thanh bên trái để nhắn tin, gọi video trực tiếp hoặc tạo nhóm trò chuyện.
               </p>
             </div>
           ) : (
@@ -1105,7 +1519,7 @@ export default function App() {
                 <div className="flex items-center gap-3 min-w-0">
                   <button
                     onClick={() => setMobileMenuOpen(true)}
-                    className="md:hidden p-2 rounded-lg hover:bg-slate-800 relative"
+                    className="md:hidden p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 relative"
                   >
                     <Menu className="w-5 h-5" />
                     {totalUnreadCount > 0 && (
@@ -1119,7 +1533,7 @@ export default function App() {
                     return (
                       <>
                         <div
-                          className={`w-10 h-10 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-sm overflow-hidden shrink-0 ${
+                          className={`w-10 h-10 rounded-full bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-sm overflow-hidden shrink-0 ${
                             info.isAdmin
                               ? 'ring-2 ring-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
                               : ''
@@ -1137,16 +1551,16 @@ export default function App() {
                           <h3 className="text-sm font-bold truncate">
                             <AdminNameBadge name={info.title} isAdmin={info.isAdmin} size="xs" />
                           </h3>
-                          <p className="text-xs text-slate-400 truncate">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                             {Object.keys(typingUsers).length > 0 ? (
-                              <span className="text-indigo-400 font-medium">
-                                {Object.values(typingUsers).join(', ')} is typing...
+                              <span className="text-indigo-500 dark:text-indigo-400 font-medium">
+                                {Object.values(typingUsers).join(', ')} đang nhập...
                               </span>
                             ) : activeConversation.type === 'direct' ? (
                               info.online ? (
-                                <span className="text-emerald-400">● Online</span>
+                                <span className="text-emerald-600 dark:text-emerald-400">● Đang hoạt động</span>
                               ) : (
-                                'Offline'
+                                'Ngoại tuyến'
                               )
                             ) : (
                               info.subtitle
@@ -1158,22 +1572,64 @@ export default function App() {
                   })()}
                 </div>
 
-                <button
-                  onClick={() => setRightDrawerOpen(!rightDrawerOpen)}
-                  className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
-                  title="Conversation Details"
-                >
-                  <Info className="w-5 h-5" />
-                </button>
+                {/* Action buttons on Chat Header: Add Friend, Pin Friend, Video Call, Info */}
+                <div className="flex items-center gap-1.5">
+                  {activeConversation.type === 'direct' && (() => {
+                    const info = getConversationDisplay(activeConversation);
+                    const otherUser = info.otherUser;
+                    if (!otherUser) return null;
+                    return (
+                      <>
+                        <button
+                          onClick={() => togglePinContact(otherUser)}
+                          title={info.isPinned ? 'Bỏ ghim bạn bè' : 'Ghim bạn bè'}
+                          className={`p-2 rounded-xl transition ${
+                            info.isPinned
+                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          <Pin className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => toggleContact(otherUser)}
+                          title={info.isFriend ? 'Đã kết bạn (Bấm để hủy)' : 'Kết bạn'}
+                          className={`p-2 rounded-xl transition ${
+                            info.isFriend
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {info.isFriend ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => startVideoCall(otherUser, activeConversation.id)}
+                          title="Gọi Video"
+                          className="p-2 rounded-xl bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 transition"
+                        >
+                          <Video className="w-4 h-4" />
+                        </button>
+                      </>
+                    );
+                  })()}
+
+                  <button
+                    onClick={() => setRightDrawerOpen(!rightDrawerOpen)}
+                    className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    title="Chi tiết cuộc trò chuyện"
+                  >
+                    <Info className="w-5 h-5" />
+                  </button>
+                </div>
               </header>
 
               {/* Message Feed */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {loadingMessages ? (
-                  <div className="text-center text-xs text-slate-400 py-8">Loading messages...</div>
+                  <div className="text-center text-xs text-slate-400 py-8">Đang tải tin nhắn...</div>
                 ) : messages.length === 0 ? (
                   <div className="text-center text-xs text-slate-400 py-12">
-                    No messages yet. Say hello to start the conversation!
+                    Chưa có tin nhắn nào. Hãy gửi lời chào đầu tiên!
                   </div>
                 ) : (
                   messages.map((msg) => {
@@ -1187,7 +1643,7 @@ export default function App() {
                       >
                         {!isMine && (
                           <div
-                            className={`w-8 h-8 rounded-full bg-slate-800 text-indigo-400 flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden ${
+                            className={`w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden ${
                               senderIsAdmin
                                 ? 'ring-2 ring-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.55)]'
                                 : ''
@@ -1207,7 +1663,7 @@ export default function App() {
 
                         <div className={`max-w-[75%] sm:max-w-md ${isMine ? 'items-end' : 'items-start'} flex flex-col`}>
                           {!isMine && (
-                            <span className="text-[11px] text-slate-400 mb-1 ml-1 flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 mb-1 ml-1 flex items-center gap-1.5">
                               <AdminNameBadge name={senderName} isAdmin={senderIsAdmin} size="xs" />
                               <span className="opacity-60">@{msg.sender?.username}</span>
                             </span>
@@ -1216,10 +1672,10 @@ export default function App() {
                           <div
                             className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed relative ${
                               msg.is_deleted
-                                ? 'bg-slate-800/40 text-slate-500 italic border border-slate-800'
+                                ? 'bg-slate-200/70 dark:bg-slate-800/40 text-slate-500 italic border border-slate-300 dark:border-slate-800'
                                 : isMine
                                 ? senderIsAdmin
-                                  ? 'bg-gradient-to-br from-indigo-600 via-indigo-600 to-amber-600/80 text-white rounded-br-sm border border-amber-400/75 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+                                  ? 'bg-gradient-to-br from-indigo-600 via-indigo-600 to-amber-600/85 text-white rounded-br-sm border border-amber-400/75 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
                                   : 'bg-indigo-600 text-white rounded-br-sm'
                                 : senderIsAdmin
                                 ? 'bg-white dark:bg-slate-900 border-2 border-amber-400/70 rounded-bl-sm shadow-[0_0_14px_rgba(245,158,11,0.18)]'
@@ -1243,11 +1699,11 @@ export default function App() {
                           </div>
                         </div>
 
-                        {(isMine || me?.is_admin) && !msg.is_deleted && (
+                        {(isMine || me?.is_admin || isGroupAdmin) && !msg.is_deleted && (
                           <button
                             onClick={() => handleDeleteMessage(msg.id)}
-                            title={isMine ? 'Delete message' : 'Admin: Xóa tin nhắn này'}
-                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 transition"
+                            title={isMine ? 'Xóa tin nhắn' : 'Quản trị viên: Xóa tin nhắn này'}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-500 transition"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1280,7 +1736,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
+                    className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
                   >
                     <Smile className="w-5 h-5" />
                   </button>
@@ -1288,7 +1744,7 @@ export default function App() {
                     type="text"
                     value={messageInput}
                     onChange={(e) => handleTyping(e.target.value)}
-                    placeholder="Write a message..."
+                    placeholder="Nhập tin nhắn..."
                     className="flex-1 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-2.5 text-sm outline-none"
                   />
                   <button
@@ -1306,7 +1762,7 @@ export default function App() {
 
         {/* RIGHT INSPECTOR SIDEBAR */}
         {activeConversation && rightDrawerOpen && (
-          <aside className="hidden lg:flex w-72 flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 p-4 overflow-y-auto">
+          <aside className="hidden lg:flex w-76 flex-col bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 p-4 overflow-y-auto">
             {(() => {
               const info = getConversationDisplay(activeConversation);
               return (
@@ -1314,7 +1770,7 @@ export default function App() {
                   <div className="flex flex-col items-center text-center pb-4 border-b border-slate-200 dark:border-slate-800">
                     <div className="relative group">
                       <div
-                        className={`w-16 h-16 rounded-2xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xl overflow-hidden ${
+                        className={`w-16 h-16 rounded-2xl bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xl overflow-hidden ${
                           info.isAdmin
                             ? 'ring-2 ring-amber-400 shadow-[0_0_16px_rgba(251,191,36,0.5)]'
                             : ''
@@ -1340,44 +1796,118 @@ export default function App() {
                         </label>
                       )}
                     </div>
-                    <h4 className="font-bold text-sm mt-3 flex items-center justify-center">
-                      <AdminNameBadge name={info.title} isAdmin={info.isAdmin} size="xs" />
-                    </h4>
-                    <p className="text-xs text-slate-400 mt-0.5">{info.subtitle}</p>
+
+                    {/* Group Title + Rename Option for Owner */}
+                    {activeConversation.type === 'group' && editingGroupName ? (
+                      <form onSubmit={handleRenameGroup} className="mt-3 flex items-center gap-1.5 w-full">
+                        <input
+                          type="text"
+                          value={newGroupNameInput}
+                          onChange={(e) => setNewGroupNameInput(e.target.value)}
+                          className="flex-1 bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs outline-none"
+                          autoFocus
+                        />
+                        <button
+                          type="submit"
+                          className="px-2 py-1 rounded-lg bg-indigo-600 text-white text-xs font-medium"
+                        >
+                          Lưu
+                        </button>
+                      </form>
+                    ) : (
+                      <div className="mt-3 flex items-center justify-center gap-1.5">
+                        <h4 className="font-bold text-sm">
+                          <AdminNameBadge name={info.title} isAdmin={info.isAdmin} size="xs" />
+                        </h4>
+                        {activeConversation.type === 'group' && isGroupOwner && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewGroupNameInput(activeConversation.name || '');
+                              setEditingGroupName(true);
+                            }}
+                            title="Đổi tên nhóm"
+                            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{info.subtitle}</p>
                     {info.otherUser?.bio && (
-                      <p className="text-xs text-slate-400 mt-2 bg-slate-100 dark:bg-slate-950 p-2.5 rounded-xl w-full">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 bg-slate-100 dark:bg-slate-950 p-2.5 rounded-xl w-full">
                         {info.otherUser.bio}
                       </p>
                     )}
+
+                    {/* Direct Chat Quick Actions */}
+                    {activeConversation.type === 'direct' && info.otherUser && (
+                      <div className="grid grid-cols-3 gap-2 w-full mt-3">
+                        <button
+                          type="button"
+                          onClick={() => toggleContact(info.otherUser!)}
+                          className={`py-2 px-2 rounded-xl text-[11px] font-medium flex flex-col items-center gap-1 transition ${
+                            info.isFriend
+                              ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {info.isFriend ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                          {info.isFriend ? 'Bạn bè' : 'Kết bạn'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => togglePinContact(info.otherUser!)}
+                          className={`py-2 px-2 rounded-xl text-[11px] font-medium flex flex-col items-center gap-1 transition ${
+                            info.isPinned
+                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          <Pin className="w-4 h-4" />
+                          {info.isPinned ? 'Đã ghim' : 'Ghim'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startVideoCall(info.otherUser!, activeConversation.id)}
+                          className="py-2 px-2 rounded-xl bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 text-[11px] font-medium flex flex-col items-center gap-1 hover:bg-indigo-600/25 transition"
+                        >
+                          <Video className="w-4 h-4" />
+                          Video Call
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Group Members & Controls */}
+                  {/* Group Members & Owner Controls */}
                   {activeConversation.type === 'group' && (
                     <div className="mt-4 space-y-4">
                       {isGroupAdmin && (
                         <div>
                           <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                            Add Member by Username
+                            Thêm thành viên qua Username
                           </label>
                           <input
                             type="text"
                             value={addMemberQuery}
                             onChange={(e) => setAddMemberQuery(e.target.value)}
-                            placeholder="Search username..."
+                            placeholder="Tìm username..."
                             className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs outline-none"
                           />
                           {addMemberResults.length > 0 && (
-                            <div className="mt-1.5 bg-slate-950 border border-slate-800 rounded-xl p-1 space-y-1">
+                            <div className="mt-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-1 space-y-1 shadow-lg">
                               {addMemberResults
                                 .filter((u) => !activeConversation.members?.some((m) => m.user_id === u.id))
                                 .map((u) => (
                                   <button
                                     key={u.id}
                                     onClick={() => handleAddMemberToGroup(u.id)}
-                                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg hover:bg-slate-900"
+                                    className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-lg hover:bg-slate-100 dark:hover:bg-slate-900"
                                   >
                                     <span>@{u.username}</span>
-                                    <Plus className="w-3.5 h-3.5 text-indigo-400" />
+                                    <Plus className="w-3.5 h-3.5 text-indigo-500" />
                                   </button>
                                 ))}
                             </div>
@@ -1387,25 +1917,30 @@ export default function App() {
 
                       <div>
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">
-                          Members ({activeConversation.members?.length || 0})
+                          Thành viên ({activeConversation.members?.length || 0})
                         </p>
                         <div className="space-y-1.5">
                           {activeConversation.members?.map((m) => {
                             const p = m.profile;
                             const online = p ? onlineUserIds.has(p.id) : false;
+                            const canManageThisMember =
+                              isGroupAdmin &&
+                              m.user_id !== sessionUserId &&
+                              (isGroupOwner || m.role === 'member');
+
                             return (
                               <div
                                 key={m.user_id}
                                 className={`flex items-center justify-between p-2 rounded-xl ${
                                   p?.is_admin
-                                    ? 'bg-amber-500/10 border border-amber-400/50'
+                                    ? 'bg-amber-50 dark:bg-amber-500/10 border border-amber-400/50'
                                     : 'bg-slate-50 dark:bg-slate-950/60'
                                 }`}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span
                                     className={`w-2 h-2 rounded-full shrink-0 ${
-                                      online ? 'bg-emerald-500' : 'bg-slate-500'
+                                      online ? 'bg-emerald-500' : 'bg-slate-400 dark:bg-slate-500'
                                     }`}
                                   />
                                   <div className="truncate">
@@ -1416,17 +1951,44 @@ export default function App() {
                                         size="xs"
                                       />
                                     </p>
-                                    <p className="text-[10px] text-slate-400 capitalize">{m.role}</p>
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                                      {m.role === 'owner'
+                                        ? '👑 Chủ nhóm (Owner)'
+                                        : m.role === 'admin'
+                                        ? '🛡️ Quản trị nhóm'
+                                        : 'Thành viên'}
+                                    </p>
                                   </div>
                                 </div>
-                                {isGroupAdmin && m.user_id !== sessionUserId && (
-                                  <button
-                                    onClick={() => handleRemoveMember(m.user_id)}
-                                    title="Remove member"
-                                    className="p-1 text-slate-400 hover:text-rose-400"
-                                  >
-                                    <UserMinus className="w-3.5 h-3.5" />
-                                  </button>
+
+                                {canManageThisMember && p && (
+                                  <div className="flex items-center gap-0.5 shrink-0">
+                                    {isGroupOwner && (
+                                      <button
+                                        onClick={() => handleToggleGroupMemberRole(m.user_id, m.role)}
+                                        title={m.role === 'admin' ? 'Hạ xuống thành viên' : 'Cấp phó nhóm (Admin)'}
+                                        className={`p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 ${
+                                          m.role === 'admin' ? 'text-amber-500' : 'text-slate-400'
+                                        }`}
+                                      >
+                                        <Shield className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleRemoveMember(m.user_id)}
+                                      title="Mời ra khỏi nhóm (Kick)"
+                                      className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-orange-500"
+                                    >
+                                      <UserMinus className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleBanMemberFromGroup(p)}
+                                      title="Cấm vĩnh viễn khỏi nhóm (Ban)"
+                                      className="p-1 rounded hover:bg-rose-500/15 text-slate-400 hover:text-rose-500"
+                                    >
+                                      <Ban className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             );
@@ -1434,13 +1996,51 @@ export default function App() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => handleRemoveMember(sessionUserId)}
-                        className="w-full py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-medium flex items-center justify-center gap-1.5"
-                      >
-                        <DoorOpen className="w-4 h-4" />
-                        Leave Group
-                      </button>
+                      {/* Group Banned List */}
+                      {isGroupAdmin && groupBannedUsers.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-rose-500 mb-2">
+                            Danh sách bị Ban ({groupBannedUsers.length})
+                          </p>
+                          <div className="space-y-1.5">
+                            {groupBannedUsers.map((b) => (
+                              <div
+                                key={b.id}
+                                className="flex items-center justify-between p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs"
+                              >
+                                <span className="truncate font-medium">@{b.username}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnbanMemberFromGroup(b.id)}
+                                  className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold"
+                                >
+                                  Gỡ Ban
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                        <button
+                          onClick={() => handleRemoveMember(sessionUserId)}
+                          className="w-full py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium flex items-center justify-center gap-1.5"
+                        >
+                          <DoorOpen className="w-4 h-4" />
+                          Rời khỏi nhóm
+                        </button>
+
+                        {isGroupOwner && (
+                          <button
+                            onClick={handleDeleteCurrentGroup}
+                            className="w-full py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center justify-center gap-1.5"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Xóa vĩnh viễn nhóm
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </>
@@ -1449,18 +2049,120 @@ export default function App() {
           </aside>
         )}
 
+        {/* WEBRTC VIDEO CALL OVERLAY */}
+        {callState !== 'idle' && callPeer && (
+          <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-4 text-white">
+            {callState === 'ringing' ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-sm w-full text-center space-y-5 shadow-2xl">
+                <div className="w-20 h-20 rounded-full bg-indigo-600/20 text-indigo-400 mx-auto flex items-center justify-center font-bold text-2xl overflow-hidden ring-4 ring-indigo-500/30 animate-pulse">
+                  {callPeer.avatar ? (
+                    <img src={callPeer.avatar} alt={callPeer.name} className="w-full h-full object-cover" />
+                  ) : (
+                    callPeer.name[0]?.toUpperCase()
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-indigo-400 font-semibold">Cuộc gọi Video đến</p>
+                  <h3 className="text-lg font-bold mt-1">{callPeer.name}</h3>
+                </div>
+                <div className="flex items-center justify-center gap-4 pt-2">
+                  <button
+                    type="button"
+                    onClick={endVideoCall}
+                    className="px-5 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center gap-2"
+                  >
+                    <PhoneOff className="w-4 h-4" />
+                    Từ chối
+                  </button>
+                  <button
+                    type="button"
+                    onClick={acceptIncomingCall}
+                    className="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-2"
+                  >
+                    <PhoneIncoming className="w-4 h-4" />
+                    Nghe máy
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="relative w-full max-w-4xl h-[75vh] bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
+                {/* Remote Video */}
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+
+                {callState === 'calling' && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70">
+                    <div className="w-20 h-20 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-2xl overflow-hidden mb-3 animate-pulse">
+                      {callPeer.avatar ? (
+                        <img src={callPeer.avatar} alt={callPeer.name} className="w-full h-full object-cover" />
+                      ) : (
+                        callPeer.name[0]?.toUpperCase()
+                      )}
+                    </div>
+                    <p className="text-base font-bold">{callPeer.name}</p>
+                    <p className="text-xs text-slate-400 mt-1">Đang đổ chuông...</p>
+                  </div>
+                )}
+
+                {/* Local Video PIP */}
+                <div className="absolute bottom-20 right-4 w-36 sm:w-48 aspect-video bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-xl">
+                  <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                </div>
+
+                {/* Controls Bar */}
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-slate-950/80 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    className={`p-3 rounded-xl transition ${
+                      micEnabled ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-rose-600 text-white'
+                    }`}
+                    title={micEnabled ? 'Tắt Micro' : 'Bật Micro'}
+                  >
+                    {micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleCam}
+                    className={`p-3 rounded-xl transition ${
+                      camEnabled ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-rose-600 text-white'
+                    }`}
+                    title={camEnabled ? 'Tắt Camera' : 'Bật Camera'}
+                  >
+                    {camEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={endVideoCall}
+                    className="px-5 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs flex items-center gap-2"
+                  >
+                    <PhoneOff className="w-4 h-4" />
+                    Kết thúc
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ADMIN CONTROL PANEL MODAL */}
         {showAdminModal && me?.is_admin && (
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-amber-500/40 rounded-2xl p-6 flex flex-col max-h-[85vh]">
+            <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-amber-500/50 rounded-2xl p-6 flex flex-col max-h-[85vh]">
               <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-400/50 text-amber-300 flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/50 text-amber-600 dark:text-amber-300 flex items-center justify-center">
                     <Shield className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="font-bold text-base">Bảng điều khiển Admin Tổng</h3>
-                    <p className="text-xs text-slate-400">Quản lý toàn bộ thành viên & nhóm chat trên hệ thống</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Quản lý toàn bộ thành viên & nhóm chat trên hệ thống
+                    </p>
                   </div>
                 </div>
                 <button type="button" onClick={() => setShowAdminModal(false)}>
@@ -1475,7 +2177,7 @@ export default function App() {
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
                     adminTab === 'users'
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   Thành viên ({adminUsers.length})
@@ -1486,7 +2188,7 @@ export default function App() {
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
                     adminTab === 'groups'
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   Tất cả nhóm chat ({adminGroups.length})
@@ -1504,13 +2206,13 @@ export default function App() {
                         key={u.id}
                         className={`flex items-center justify-between gap-3 p-3 rounded-xl border ${
                           u.is_admin
-                            ? 'bg-amber-500/5 border-amber-400/50'
+                            ? 'bg-amber-50/70 dark:bg-amber-500/5 border-amber-400/50'
                             : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div
-                            className={`w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
+                            className={`w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
                               u.is_admin ? 'ring-2 ring-amber-400' : ''
                             }`}
                           >
@@ -1526,12 +2228,12 @@ export default function App() {
                                 <AdminNameBadge name={u.display_name} isAdmin={u.is_admin} size="xs" />
                               </p>
                               {u.is_banned && (
-                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-rose-500/20 text-rose-400">
+                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-rose-500/20 text-rose-500">
                                   BỊ KHÓA
                                 </span>
                               )}
                             </div>
-                            <p className="text-[11px] text-slate-400 truncate">
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                               @{u.username} • {u.email}
                             </p>
                           </div>
@@ -1544,8 +2246,8 @@ export default function App() {
                               onClick={() => handleToggleAdminRole(u)}
                               className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition ${
                                 u.is_admin
-                                  ? 'bg-amber-500/15 text-amber-300 border border-amber-400/50 hover:bg-amber-500/25'
-                                  : 'bg-slate-200 dark:bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                  ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-400/50'
+                                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
                               }`}
                             >
                               {u.is_admin ? 'Gỡ Admin' : 'Cấp Admin'}
@@ -1555,8 +2257,8 @@ export default function App() {
                               onClick={() => handleToggleBanUser(u)}
                               className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition ${
                                 u.is_banned
-                                  ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
-                                  : 'bg-rose-500/15 text-rose-400 hover:bg-rose-500/25'
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
                               }`}
                             >
                               {u.is_banned ? (
@@ -1584,7 +2286,7 @@ export default function App() {
                     >
                       <div className="truncate">
                         <p className="text-xs font-bold truncate">{g.name || 'Unnamed Group'}</p>
-                        <p className="text-[11px] text-slate-400">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
                           {g.members?.length || 0} thành viên • Tin nhắn cuối: {g.last_message_text || 'Trống'}
                         </p>
                       </div>
@@ -1599,7 +2301,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => handleAdminDeleteGroup(g.id)}
-                          className="px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 text-[11px] font-medium"
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-medium"
                         >
                           Xóa nhóm
                         </button>
@@ -1620,35 +2322,35 @@ export default function App() {
               className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="font-bold text-base">Create Group Chat</h3>
+                <h3 className="font-bold text-base">Tạo nhóm chat mới</h3>
                 <button type="button" onClick={() => setShowNewGroupModal(false)}>
                   <X className="w-5 h-5 text-slate-400" />
                 </button>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Group Name</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Tên nhóm</label>
                 <input
                   type="text"
                   required
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
-                  placeholder="Design Squad"
+                  placeholder="Nhóm bạn thân..."
                   className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-sm outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">
-                  Select Contacts ({selectedGroupUsers.length} selected)
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                  Chọn bạn bè ({selectedGroupUsers.length} đã chọn)
                 </label>
                 <div className="max-h-44 overflow-y-auto space-y-1 bg-slate-100 dark:bg-slate-950 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
-                  {contacts.length === 0 ? (
+                  {sortedContacts.length === 0 ? (
                     <p className="text-xs text-slate-500 p-2">
-                      Add users to your contacts from the search bar first, then select them here.
+                      Hãy kết bạn với người dùng từ thanh tìm kiếm trước rồi chọn tại đây.
                     </p>
                   ) : (
-                    contacts.map((c) => {
+                    sortedContacts.map((c) => {
                       const checked = selectedGroupUsers.includes(c.id);
                       return (
                         <button
@@ -1660,7 +2362,7 @@ export default function App() {
                             )
                           }
                           className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs ${
-                            checked ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800/50'
+                            checked ? 'bg-indigo-600 text-white' : 'hover:bg-slate-200 dark:hover:bg-slate-800/50'
                           }`}
                         >
                           <span>
@@ -1679,7 +2381,7 @@ export default function App() {
                 disabled={!groupName.trim() || selectedGroupUsers.length === 0}
                 className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm font-medium"
               >
-                Create Group
+                Tạo nhóm (Bạn làm Chủ nhóm)
               </button>
             </form>
           </div>
@@ -1693,7 +2395,7 @@ export default function App() {
               className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="font-bold text-base">Profile Settings</h3>
+                <h3 className="font-bold text-base">Cài đặt hồ sơ cá nhân</h3>
                 <button type="button" onClick={() => setShowProfileModal(false)}>
                   <X className="w-5 h-5 text-slate-400" />
                 </button>
@@ -1712,7 +2414,7 @@ export default function App() {
                   )}
                 </div>
                 <label className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-medium cursor-pointer hover:opacity-90">
-                  Upload New Avatar
+                  Tải ảnh đại diện mới
                   <input
                     type="file"
                     accept="image/*"
@@ -1723,7 +2425,9 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Display Name</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                  Tên hiển thị
+                </label>
                 <input
                   type="text"
                   value={editDisplayName}
@@ -1733,7 +2437,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Bio</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Tiểu sử</label>
                 <input
                   type="text"
                   value={editBio}
@@ -1743,16 +2447,18 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Presence Status</label>
+                <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+                  Trạng thái hoạt động
+                </label>
                 <select
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as UserStatus)}
                   className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 text-sm outline-none"
                 >
-                  <option value="online">Online</option>
-                  <option value="idle">Idle</option>
-                  <option value="dnd">Do Not Disturb</option>
-                  <option value="offline">Appear Offline</option>
+                  <option value="online">Trực tuyến (Online)</option>
+                  <option value="idle">Tạm vắng (Idle)</option>
+                  <option value="dnd">Không làm phiền</option>
+                  <option value="offline">Ẩn trạng thái</option>
                 </select>
               </div>
 
@@ -1760,7 +2466,7 @@ export default function App() {
                 type="submit"
                 className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium"
               >
-                Save Changes
+                Lưu thay đổi
               </button>
             </form>
           </div>
