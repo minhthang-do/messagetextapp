@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-
 import {
   Search,
   Plus,
@@ -36,18 +35,24 @@ export default function App() {
 
   const [darkMode, setDarkMode] = useState(true);
   useEffect(() => {
-  if (darkMode) {
-    document.documentElement.classList.add('dark');
-  } else {
-    document.documentElement.classList.remove('dark');
-  }
-}, [darkMode]);
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(true);
 
   // Conversations & Active Chat
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
+  const activeConvIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageInput, setMessageInput] = useState('');
@@ -78,6 +83,17 @@ export default function App() {
   const [addMemberResults, setAddMemberResults] = useState<Profile[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Tổng số tin nhắn chưa đọc trên toàn bộ cuộc trò chuyện
+  const totalUnreadCount = useMemo(
+    () => conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0),
+    [conversations]
+  );
+
+  // Cập nhật số tin nhắn chưa đọc lên tiêu đề tab trình duyệt
+  useEffect(() => {
+    document.title = totalUnreadCount > 0 ? `(${totalUnreadCount}) BocPhet Chat` : 'BocPhet Chat';
+  }, [totalUnreadCount]);
 
   // 1. Auth Session Listener
   useEffect(() => {
@@ -153,7 +169,7 @@ export default function App() {
           return {
             ...c,
             members: c.conversation_members || [],
-            unread_count: c.id === activeConvId ? 0 : count || 0,
+            unread_count: c.id === activeConvIdRef.current ? 0 : count || 0,
           };
         })
       );
@@ -192,6 +208,23 @@ export default function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => {
         loadConversations(sessionUserId);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        const newMsg = payload.new as any;
+        if (newMsg.sender_id !== sessionUserId && newMsg.conversation_id !== activeConvIdRef.current) {
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === newMsg.conversation_id
+                ? {
+                    ...c,
+                    unread_count: (c.unread_count || 0) + 1,
+                    last_message_text: newMsg.content,
+                    last_message_at: newMsg.created_at,
+                  }
+                : c
+            )
+          );
+        }
       })
       .subscribe();
 
@@ -583,8 +616,15 @@ export default function App() {
           {/* App Header */}
           <div className="h-16 px-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20">
-                <MessageSquare className="w-5 h-5" />
+              <div className="relative">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/20">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                {totalUnreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900">
+                    {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+                  </span>
+                )}
               </div>
               <span className="font-bold text-base tracking-tight">BocPhet Chat</span>
             </div>
@@ -840,12 +880,24 @@ export default function App() {
             <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
               <button
                 onClick={() => setMobileMenuOpen(true)}
-                className="md:hidden mb-6 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium"
+                className="md:hidden mb-6 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium relative"
               >
                 Open Chats & Search
+                {totalUnreadCount > 0 && (
+                  <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-500 text-white">
+                    {totalUnreadCount}
+                  </span>
+                )}
               </button>
-              <div className="w-16 h-16 rounded-2xl bg-indigo-600/15 text-indigo-400 flex items-center justify-center mb-4">
-                <MessageSquare className="w-8 h-8" />
+              <div className="relative mb-4">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-600/15 text-indigo-400 flex items-center justify-center">
+                  <MessageSquare className="w-8 h-8" />
+                </div>
+                {totalUnreadCount > 0 && (
+                  <span className="absolute -top-2 -right-2 min-w-[22px] h-[22px] px-1.5 flex items-center justify-center text-xs font-bold rounded-full bg-rose-500 text-white ring-2 ring-slate-50 dark:ring-slate-950">
+                    {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+                  </span>
+                )}
               </div>
               <h2 className="text-lg font-bold">Welcome to BocPhet Chat</h2>
               <p className="text-xs text-slate-400 max-w-sm mt-1.5 leading-relaxed">
@@ -860,9 +912,14 @@ export default function App() {
                 <div className="flex items-center gap-3 min-w-0">
                   <button
                     onClick={() => setMobileMenuOpen(true)}
-                    className="md:hidden p-2 rounded-lg hover:bg-slate-800"
+                    className="md:hidden p-2 rounded-lg hover:bg-slate-800 relative"
                   >
                     <Menu className="w-5 h-5" />
+                    {totalUnreadCount > 0 && (
+                      <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 flex items-center justify-center text-[9px] font-bold rounded-full bg-rose-500 text-white">
+                        {totalUnreadCount}
+                      </span>
+                    )}
                   </button>
                   {(() => {
                     const info = getConversationDisplay(activeConversation);
