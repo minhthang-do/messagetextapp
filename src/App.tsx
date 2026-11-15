@@ -34,12 +34,41 @@ import {
   PhoneOff,
   PhoneIncoming,
   Edit3,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { AuthScreen } from './components/AuthScreen';
 import { Conversation, Message, Profile, UserStatus } from './types';
 
 const EMOJIS = ['😀', '😂', '🔥', '❤️', '👍', '🎉', '🚀', '🙌', '😎', '🤔', '💯', '✨', '👏', '🥳', '💡', '🤝'];
+
+const PRESET_GIFS = [
+  { label: 'Haha', url: 'https://media.giphy.com/media/10JhviFuU2gWD6/giphy.gif' },
+  { label: 'Vỗ tay', url: 'https://media.giphy.com/media/l3q2XhfQ8oCkm1Ts4/giphy.gif' },
+  { label: 'Thả tim', url: 'https://media.giphy.com/media/26BRv0ThflsHCqDrG/giphy.gif' },
+  { label: 'OK bro', url: 'https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif' },
+  { label: 'Bất ngờ', url: 'https://media.giphy.com/media/5VKbvrjxpVJCM/giphy.gif' },
+  { label: 'Xin chào', url: 'https://media.giphy.com/media/3o7TKMt1VVNkHV2PaE/giphy.gif' },
+  { label: 'Khóc ròng', url: 'https://media.giphy.com/media/d2lcHJTG5Tscg/giphy.gif' },
+  { label: 'Đỉnh cao', url: 'https://media.giphy.com/media/artj92V8o75VPL7AeQ/giphy.gif' },
+  { label: 'Suy nghĩ', url: 'https://media.giphy.com/media/a5viI92PAF89q/giphy.gif' },
+  { label: 'Ngầu lòi', url: 'https://media.giphy.com/media/62PP2yEIAZF6g/giphy.gif' },
+  { label: 'Chúc mừng', url: 'https://media.giphy.com/media/g9582DNuQppxC/giphy.gif' },
+  { label: 'Quẩy lên', url: 'https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif' },
+];
+
+const GIF_PREFIX = '[GIF]';
+
+function extractGifUrl(content: string): string | null {
+  if (!content) return null;
+  if (content.startsWith(GIF_PREFIX)) {
+    return content.slice(GIF_PREFIX.length).trim();
+  }
+  if (/^https?:\/\/\S+\.gif(\?\S*)?$/i.test(content.trim())) {
+    return content.trim();
+  }
+  return null;
+}
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -48,7 +77,6 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
-// Component hiển thị Tên + Huy hiệu Vương miện & Viền vàng tương thích cả Light Mode lẫn Dark Mode
 function AdminNameBadge({
   name,
   isAdmin,
@@ -100,12 +128,9 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [me, setMe] = useState<Profile | null>(null);
 
- const [darkMode, setDarkMode] = useState(() => {
+  const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('bocphet_theme');
-    if (saved !== null) {
-      return saved === 'dark';
-    }
-    return true; // Mặc định là Dark Mode nếu chưa chọn gì
+    return saved !== null ? saved === 'dark' : true;
   });
 
   useEffect(() => {
@@ -133,6 +158,12 @@ export default function App() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // GIF Picker States
+  const [showGifPicker, setShowGifPicker] = useState(false);
+  const [gifSearchQuery, setGifSearchQuery] = useState('');
+  const [gifResults, setGifResults] = useState<{ label: string; url: string }[]>(PRESET_GIFS);
+  const [loadingGifs, setLoadingGifs] = useState(false);
 
   // Search & Contacts (Friends)
   const [searchQuery, setSearchQuery] = useState('');
@@ -189,7 +220,51 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Tổng số tin nhắn chưa đọc
+  // Tìm kiếm GIF qua Tenor public API hoặc lọc danh sách có sẵn
+  useEffect(() => {
+    if (!showGifPicker) return;
+    const q = gifSearchQuery.trim();
+    if (!q) {
+      setGifResults(PRESET_GIFS);
+      return;
+    }
+
+    // Nếu người dùng dán trực tiếp URL .gif
+    if (/^https?:\/\/\S+\.gif(\?\S*)?$/i.test(q)) {
+      setGifResults([{ label: 'Link GIF trực tiếp', url: q }]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setLoadingGifs(true);
+      try {
+        const res = await fetch(
+          `https://g.tenor.com/v1/search?q=${encodeURIComponent(q)}&key=LIVDSRZULELA&limit=12&media_filter=minimal`
+        );
+        const json = await res.json();
+        if (json?.results?.length) {
+          const mapped = json.results
+            .map((item: any) => ({
+              label: item.content_description || q,
+              url: item.media?.[0]?.tinygif?.url || item.media?.[0]?.gif?.url,
+            }))
+            .filter((x: any) => Boolean(x.url));
+          setGifResults(mapped.length ? mapped : PRESET_GIFS);
+        } else {
+          const filtered = PRESET_GIFS.filter((g) => g.label.toLowerCase().includes(q.toLowerCase()));
+          setGifResults(filtered.length ? filtered : PRESET_GIFS);
+        }
+      } catch {
+        const filtered = PRESET_GIFS.filter((g) => g.label.toLowerCase().includes(q.toLowerCase()));
+        setGifResults(filtered.length ? filtered : PRESET_GIFS);
+      } finally {
+        setLoadingGifs(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [gifSearchQuery, showGifPicker]);
+
   const totalUnreadCount = useMemo(
     () => conversations.reduce((sum, conv) => sum + (conv.unread_count || 0), 0),
     [conversations]
@@ -199,12 +274,10 @@ export default function App() {
     document.title = totalUnreadCount > 0 ? `(${totalUnreadCount}) BocPhet Chat` : 'BocPhet Chat';
   }, [totalUnreadCount]);
 
-  // Sắp xếp bạn bè: người được ghim (is_pinned) lên trước
   const sortedContacts = useMemo(() => {
     return [...contacts].sort((a, b) => Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned)));
   }, [contacts]);
 
-  // Sắp xếp hội thoại: ưu tiên cuộc trò chuyện trực tiếp với bạn đã ghim lên đầu
   const sortedConversations = useMemo(() => {
     const pinnedIds = new Set(contacts.filter((c) => c.is_pinned).map((c) => c.id));
     return [...conversations].sort((a, b) => {
@@ -340,6 +413,26 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => {
         loadConversations(sessionUserId);
       })
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${sessionUserId}`,
+        },
+        async (payload) => {
+          const updated = payload.new as Profile;
+          if (updated.is_banned) {
+            alert('Tài khoản của bạn đã bị Quản trị viên khóa vĩnh viễn.');
+            await supabase.auth.signOut();
+            setMe(null);
+            setActiveConvId(null);
+          } else {
+            setMe((prev) => (prev ? { ...prev, ...updated } : updated));
+          }
+        }
+      )
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         const newMsg = payload.new as any;
         if (newMsg.sender_id !== sessionUserId && newMsg.conversation_id !== activeConvIdRef.current) {
@@ -359,13 +452,12 @@ export default function App() {
       })
       .subscribe();
 
-    // Kênh tín hiệu Video Call riêng của từng người dùng
     const callChannel = supabase.channel(`webrtc-call:${sessionUserId}`);
     callSignalChannelRef.current = callChannel;
 
     callChannel
       .on('broadcast', { event: 'call-offer' }, ({ payload }) => {
-        if (pcRef.current) return; // Đang bận cuộc gọi khác
+        if (pcRef.current) return;
         setCallPeer({
           userId: payload.fromUserId,
           name: payload.fromName,
@@ -439,6 +531,8 @@ export default function App() {
     setLoadingMessages(true);
     setTypingUsers({});
     setEditingGroupName(false);
+    setShowGifPicker(false);
+    setShowEmojiPicker(false);
 
     const fetchMessages = async () => {
       const { data } = await supabase
@@ -799,7 +893,6 @@ export default function App() {
     }
   };
 
-  // Add / Remove Friend
   const toggleContact = async (targetUser: Profile) => {
     if (!sessionUserId) return;
     const exists = contacts.some((c) => c.id === targetUser.id);
@@ -814,12 +907,10 @@ export default function App() {
     }
   };
 
-  // Pin / Unpin Friend
   const togglePinContact = async (targetUser: Profile) => {
     if (!sessionUserId) return;
     const existing = contacts.find((c) => c.id === targetUser.id);
     if (!existing) {
-      // Nếu chưa kết bạn thì tự động kết bạn và ghim luôn
       await supabase
         .from('contacts')
         .insert({ user_id: sessionUserId, contact_id: targetUser.id, is_pinned: true });
@@ -865,6 +956,7 @@ export default function App() {
 
     setMessageInput('');
     setShowEmojiPicker(false);
+    setShowGifPicker(false);
 
     channelRef.current?.send({
       type: 'broadcast',
@@ -876,6 +968,19 @@ export default function App() {
       conversation_id: activeConvId,
       sender_id: sessionUserId,
       content,
+    });
+  };
+
+  const handleSendGif = async (gifUrl: string) => {
+    if (!activeConvId || !sessionUserId || !gifUrl) return;
+    setShowGifPicker(false);
+    setShowEmojiPicker(false);
+    setGifSearchQuery('');
+
+    await supabase.from('messages').insert({
+      conversation_id: activeConvId,
+      sender_id: sessionUserId,
+      content: `${GIF_PREFIX}${gifUrl}`,
     });
   };
 
@@ -918,7 +1023,6 @@ export default function App() {
     }
   };
 
-  // Group Owner / Admin Actions
   const handleRenameGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeConvId || !sessionUserId || !newGroupNameInput.trim()) return;
@@ -1264,7 +1368,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Friends / Contacts Strip (Pinned first) */}
+          {/* Friends / Contacts Strip */}
           {sortedContacts.length > 0 && (
             <div className="px-3 py-2.5 border-b border-slate-200 dark:border-slate-800">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
@@ -1348,6 +1452,12 @@ export default function App() {
               sortedConversations.map((conv) => {
                 const info = getConversationDisplay(conv);
                 const selected = conv.id === activeConvId;
+                const previewText = conv.last_message_text
+                  ? extractGifUrl(conv.last_message_text)
+                    ? '🎞️ Đã gửi một ảnh GIF'
+                    : conv.last_message_text
+                  : info.subtitle;
+
                 return (
                   <button
                     key={conv.id}
@@ -1416,7 +1526,7 @@ export default function App() {
                           selected ? 'text-indigo-100' : 'text-slate-500 dark:text-slate-400'
                         }`}
                       >
-                        {conv.last_message_text || info.subtitle}
+                        {previewText}
                       </p>
                     </div>
                   </button>
@@ -1425,7 +1535,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Current User Profile Footer (Fixed Light Mode & Dark Mode Contrast) */}
+          {/* Current User Profile Footer */}
           {me && (
             <div
               className={`p-3 border-t flex items-center justify-between gap-2 transition-colors ${
@@ -1518,7 +1628,7 @@ export default function App() {
               </div>
               <h2 className="text-lg font-bold">Chào mừng đến với BocPhet Chat</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mt-1.5 leading-relaxed">
-                Tìm kiếm bạn bè qua username ở thanh bên trái để nhắn tin, gọi video trực tiếp hoặc tạo nhóm trò chuyện.
+                Tìm kiếm bạn bè qua username ở thanh bên trái để nhắn tin, gửi GIF, gọi video trực tiếp hoặc tạo nhóm trò chuyện.
               </p>
             </div>
           ) : (
@@ -1581,7 +1691,7 @@ export default function App() {
                   })()}
                 </div>
 
-                {/* Action buttons on Chat Header: Add Friend, Pin Friend, Video Call, Info */}
+                {/* Action buttons on Chat Header */}
                 <div className="flex items-center gap-1.5">
                   {activeConversation.type === 'direct' && (() => {
                     const info = getConversationDisplay(activeConversation);
@@ -1645,6 +1755,8 @@ export default function App() {
                     const isMine = msg.sender_id === sessionUserId;
                     const senderIsAdmin = Boolean(msg.sender?.is_admin);
                     const senderName = msg.sender?.display_name || msg.sender?.username || 'User';
+                    const gifUrl = !msg.is_deleted ? extractGifUrl(msg.content) : null;
+
                     return (
                       <div
                         key={msg.id}
@@ -1679,7 +1791,9 @@ export default function App() {
                           )}
 
                           <div
-                            className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed relative ${
+                            className={`${
+                              gifUrl ? 'p-1.5' : 'px-3.5 py-2.5'
+                            } rounded-2xl text-sm leading-relaxed relative overflow-hidden ${
                               msg.is_deleted
                                 ? 'bg-slate-200/70 dark:bg-slate-800/40 text-slate-500 italic border border-slate-300 dark:border-slate-800'
                                 : isMine
@@ -1691,11 +1805,20 @@ export default function App() {
                                 : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-bl-sm'
                             }`}
                           >
-                            <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                            {gifUrl ? (
+                              <img
+                                src={gifUrl}
+                                alt="GIF"
+                                loading="lazy"
+                                className="rounded-xl max-h-60 w-auto object-contain bg-slate-900/20"
+                              />
+                            ) : (
+                              <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                            )}
                             <div
                               className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
-                                isMine ? 'text-indigo-200' : 'text-slate-400'
-                              }`}
+                                gifUrl ? 'px-1.5 pb-0.5' : ''
+                              } ${isMine ? 'text-indigo-200' : 'text-slate-400'}`}
                             >
                               <span>
                                 {new Date(msg.created_at).toLocaleTimeString([], {
@@ -1741,14 +1864,88 @@ export default function App() {
                   </div>
                 )}
 
-                <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+                {/* GIF Picker Popover */}
+                {showGifPicker && (
+                  <div className="absolute bottom-16 left-4 right-4 sm:right-auto sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-2xl z-20 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold flex items-center gap-1.5">
+                        <ImageIcon className="w-3.5 h-3.5 text-indigo-500" />
+                        Chọn hoặc tìm GIF
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowGifPicker(false)}
+                        className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={gifSearchQuery}
+                      onChange={(e) => setGifSearchQuery(e.target.value)}
+                      placeholder="Tìm từ khóa (haha, cat, dance) hoặc dán link .gif..."
+                      className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-indigo-500"
+                      autoFocus
+                    />
+
+                    <div className="max-h-56 overflow-y-auto grid grid-cols-3 gap-1.5 pr-0.5">
+                      {loadingGifs ? (
+                        <p className="col-span-3 text-center text-xs text-slate-400 py-6">Đang tìm GIF...</p>
+                      ) : (
+                        gifResults.map((g, idx) => (
+                          <button
+                            key={`${g.url}-${idx}`}
+                            type="button"
+                            onClick={() => handleSendGif(g.url)}
+                            title={g.label}
+                            className="group relative aspect-square rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 hover:ring-2 hover:ring-indigo-500 transition"
+                          >
+                            <img src={g.url} alt={g.label} loading="lazy" className="w-full h-full object-cover" />
+                            <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate opacity-0 group-hover:opacity-100 transition">
+                              {g.label}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 sm:gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                    className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    onClick={() => {
+                      setShowEmojiPicker(!showEmojiPicker);
+                      setShowGifPicker(false);
+                    }}
+                    title="Biểu tượng cảm xúc"
+                    className={`p-2.5 rounded-xl transition ${
+                      showEmojiPicker
+                        ? 'bg-indigo-600/15 text-indigo-600 dark:text-indigo-400'
+                        : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400'
+                    }`}
                   >
                     <Smile className="w-5 h-5" />
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGifPicker(!showGifPicker);
+                      setShowEmojiPicker(false);
+                    }}
+                    title="Gửi ảnh động GIF"
+                    className={`px-2.5 py-2 rounded-xl text-[11px] font-extrabold tracking-wide border transition ${
+                      showGifPicker
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-500'
+                    }`}
+                  >
+                    GIF
+                  </button>
+
                   <input
                     type="text"
                     value={messageInput}
@@ -1806,7 +2003,6 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* Group Title + Rename Option for Owner */}
                     {activeConversation.type === 'group' && editingGroupName ? (
                       <form onSubmit={handleRenameGroup} className="mt-3 flex items-center gap-1.5 w-full">
                         <input
@@ -1851,7 +2047,6 @@ export default function App() {
                       </p>
                     )}
 
-                    {/* Direct Chat Quick Actions */}
                     {activeConversation.type === 'direct' && info.otherUser && (
                       <div className="grid grid-cols-3 gap-2 w-full mt-3">
                         <button
@@ -2005,7 +2200,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Group Banned List */}
                       {isGroupAdmin && groupBannedUsers.length > 0 && (
                         <div>
                           <p className="text-[10px] font-semibold uppercase tracking-wider text-rose-500 mb-2">
@@ -2095,13 +2289,7 @@ export default function App() {
               </div>
             ) : (
               <div className="relative w-full max-w-4xl h-[75vh] bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center">
-                {/* Remote Video */}
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  className="w-full h-full object-cover"
-                />
+                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
 
                 {callState === 'calling' && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70">
@@ -2117,12 +2305,10 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Local Video PIP */}
                 <div className="absolute bottom-20 right-4 w-36 sm:w-48 aspect-video bg-slate-950 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-xl">
                   <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
                 </div>
 
-                {/* Controls Bar */}
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-slate-950/80 backdrop-blur-md px-5 py-2.5 rounded-2xl border border-slate-800">
                   <button
                     type="button"
@@ -2296,7 +2482,12 @@ export default function App() {
                       <div className="truncate">
                         <p className="text-xs font-bold truncate">{g.name || 'Unnamed Group'}</p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          {g.members?.length || 0} thành viên • Tin nhắn cuối: {g.last_message_text || 'Trống'}
+                          {g.members?.length || 0} thành viên • Tin nhắn cuối:{' '}
+                          {g.last_message_text
+                            ? extractGifUrl(g.last_message_text)
+                              ? '🎞️ Ảnh GIF'
+                              : g.last_message_text
+                            : 'Trống'}
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
