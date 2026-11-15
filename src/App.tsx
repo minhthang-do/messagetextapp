@@ -21,6 +21,9 @@ import {
   UserMinus,
   DoorOpen,
   MessageSquare,
+  Shield,
+  Ban,
+  CheckCircle,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { AuthScreen } from './components/AuthScreen';
@@ -78,6 +81,13 @@ export default function App() {
   const [editBio, setEditBio] = useState('');
   const [editStatus, setEditStatus] = useState<UserStatus>('online');
 
+  // Admin Panel Modal
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [adminUsers, setAdminUsers] = useState<Profile[]>([]);
+  const [adminGroups, setAdminGroups] = useState<Conversation[]>([]);
+  const [adminTab, setAdminTab] = useState<'users' | 'groups'>('users');
+  const [adminLoading, setAdminLoading] = useState(false);
+
   // Add Member to existing group
   const [addMemberQuery, setAddMemberQuery] = useState('');
   const [addMemberResults, setAddMemberResults] = useState<Profile[]>([]);
@@ -116,6 +126,12 @@ export default function App() {
   const loadMyData = async (uid: string) => {
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle();
     if (profile) {
+      if (profile.is_banned) {
+        alert('Tài khoản của bạn đã bị Quản trị viên tạm khóa.');
+        await supabase.auth.signOut();
+        setMe(null);
+        return;
+      }
       setMe(profile as Profile);
       setEditDisplayName(profile.display_name);
       setEditBio(profile.bio || '');
@@ -338,6 +354,74 @@ export default function App() {
       .eq('user_id', sessionUserId);
 
     setConversations((prev) => prev.map((c) => (c.id === convId ? { ...c, unread_count: 0 } : c)));
+  };
+
+  // Admin Panel Data Loader
+  const openAdminPanel = async () => {
+    setShowAdminModal(true);
+    setAdminLoading(true);
+    const [{ data: usersData }, { data: groupsData }] = await Promise.all([
+      supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+      supabase
+        .from('conversations')
+        .select('*, conversation_members(*, profile:profiles(*))')
+        .eq('type', 'group')
+        .order('created_at', { ascending: false }),
+    ]);
+
+    if (usersData) setAdminUsers(usersData as Profile[]);
+    if (groupsData) {
+      setAdminGroups(
+        groupsData.map((g: any) => ({
+          ...g,
+          members: g.conversation_members || [],
+        }))
+      );
+    }
+    setAdminLoading(false);
+  };
+
+  const handleToggleBanUser = async (targetUser: Profile) => {
+    if (!me?.is_admin || targetUser.id === me.id) return;
+    const nextBan = !targetUser.is_banned;
+    const { error } = await supabase.from('profiles').update({ is_banned: nextBan }).eq('id', targetUser.id);
+    if (!error) {
+      setAdminUsers((prev) => prev.map((u) => (u.id === targetUser.id ? { ...u, is_banned: nextBan } : u)));
+    }
+  };
+
+  const handleToggleAdminRole = async (targetUser: Profile) => {
+    if (!me?.is_admin || targetUser.id === me.id) return;
+    const nextAdmin = !targetUser.is_admin;
+    const { error } = await supabase.from('profiles').update({ is_admin: nextAdmin }).eq('id', targetUser.id);
+    if (!error) {
+      setAdminUsers((prev) => prev.map((u) => (u.id === targetUser.id ? { ...u, is_admin: nextAdmin } : u)));
+    }
+  };
+
+  const handleAdminJoinAndOpenGroup = async (group: Conversation) => {
+    if (!sessionUserId || !me?.is_admin) return;
+    const isAlreadyMember = group.members?.some((m) => m.user_id === sessionUserId);
+    if (!isAlreadyMember) {
+      await supabase.from('conversation_members').insert({
+        conversation_id: group.id,
+        user_id: sessionUserId,
+        role: 'admin',
+      });
+    }
+    await loadConversations(sessionUserId);
+    setActiveConvId(group.id);
+    setShowAdminModal(false);
+    setMobileMenuOpen(false);
+  };
+
+  const handleAdminDeleteGroup = async (groupId: string) => {
+    if (!me?.is_admin || !sessionUserId) return;
+    if (!window.confirm('Bạn có chắc chắn muốn xóa vĩnh viễn nhóm chat này không?')) return;
+    await supabase.from('conversations').delete().eq('id', groupId);
+    setAdminGroups((prev) => prev.filter((g) => g.id !== groupId));
+    if (activeConvId === groupId) setActiveConvId(null);
+    await loadConversations(sessionUserId);
   };
 
   // Search Users by Username
@@ -602,7 +686,8 @@ export default function App() {
   }
 
   const myMembership = activeConversation?.members?.find((m) => m.user_id === sessionUserId);
-  const isGroupAdmin = myMembership?.role === 'owner' || myMembership?.role === 'admin';
+  const isGroupAdmin =
+    Boolean(me?.is_admin) || myMembership?.role === 'owner' || myMembership?.role === 'admin';
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -615,34 +700,31 @@ export default function App() {
         >
           {/* App Header */}
           <div className="h-16 px-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
-
-            
             <div className="flex items-center gap-2.5">
-  <button
-    type="button"
-    onClick={() => setShowProfileModal(true)}
-    title="Cài đặt hồ sơ cá nhân"
-    className="relative group shrink-0 cursor-pointer"
-  >
-    <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-indigo-600/20 overflow-hidden ring-2 ring-transparent group-hover:ring-indigo-500 transition">
-      {me?.avatar_url ? (
-        <img src={me.avatar_url} alt={me.username} className="w-full h-full object-cover" />
-      ) : me?.username ? (
-        me.username[0].toUpperCase()
-      ) : (
-        <MessageSquare className="w-5 h-5" />
-      )}
-    </div>
-    {totalUnreadCount > 0 && (
-      <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900">
-        {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
-      </span>
-    )}
-  </button>
-  <span className="font-bold text-base tracking-tight">BocPhet Chat</span>
-</div>
+              <button
+                type="button"
+                onClick={() => setShowProfileModal(true)}
+                title="Cài đặt hồ sơ cá nhân"
+                className="relative group shrink-0 cursor-pointer"
+              >
+                <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-indigo-600/20 overflow-hidden ring-2 ring-transparent group-hover:ring-indigo-500 transition">
+                  {me?.avatar_url ? (
+                    <img src={me.avatar_url} alt={me.username} className="w-full h-full object-cover" />
+                  ) : me?.username ? (
+                    me.username[0].toUpperCase()
+                  ) : (
+                    <MessageSquare className="w-5 h-5" />
+                  )}
+                </div>
+                {totalUnreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold rounded-full bg-rose-500 text-white ring-2 ring-white dark:ring-slate-900">
+                    {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+                  </span>
+                )}
+              </button>
               <span className="font-bold text-base tracking-tight">BocPhet Chat</span>
             </div>
+
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowNewGroupModal(true)}
@@ -864,12 +946,28 @@ export default function App() {
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 absolute bottom-0 right-0 ring-2 ring-slate-950" />
                 </div>
                 <div className="truncate">
-                  <p className="text-xs font-semibold truncate">{me.display_name}</p>
+                  <p className="text-xs font-semibold truncate flex items-center gap-1">
+                    {me.display_name}
+                    {me.is_admin && (
+                      <span className="px-1.5 py-0.2 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400">
+                        ADMIN
+                      </span>
+                    )}
+                  </p>
                   <p className="text-[11px] text-slate-400 truncate">@{me.username}</p>
                 </div>
               </button>
 
               <div className="flex items-center gap-1">
+                {me.is_admin && (
+                  <button
+                    onClick={openAdminPanel}
+                    title="Bảng điều khiển Admin"
+                    className="p-2 rounded-lg hover:bg-amber-500/15 text-amber-400"
+                  >
+                    <Shield className="w-4 h-4" />
+                  </button>
+                )}
                 <button
                   onClick={() => setShowProfileModal(true)}
                   title="Account Settings"
@@ -1045,10 +1143,10 @@ export default function App() {
                           </div>
                         </div>
 
-                        {isMine && !msg.is_deleted && (
+                        {(isMine || me?.is_admin) && !msg.is_deleted && (
                           <button
                             onClick={() => handleDeleteMessage(msg.id)}
-                            title="Delete message"
+                            title={isMine ? 'Delete message' : 'Admin: Xóa tin nhắn này'}
                             className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 transition"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1233,6 +1331,164 @@ export default function App() {
               );
             })()}
           </aside>
+        )}
+
+        {/* ADMIN CONTROL PANEL MODAL */}
+        {showAdminModal && me?.is_admin && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 flex flex-col max-h-[85vh]">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
+                    <Shield className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base">Bảng điều khiển Admin Tổng</h3>
+                    <p className="text-xs text-slate-400">Quản lý toàn bộ thành viên & nhóm chat trên hệ thống</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setShowAdminModal(false)}>
+                  <X className="w-5 h-5 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="flex gap-2 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('users')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
+                    adminTab === 'users'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Thành viên ({adminUsers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('groups')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
+                    adminTab === 'groups'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Tất cả nhóm chat ({adminGroups.length})
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto mt-4 space-y-2 pr-1">
+                {adminLoading ? (
+                  <p className="text-center text-xs text-slate-400 py-8">Đang tải dữ liệu hệ thống...</p>
+                ) : adminTab === 'users' ? (
+                  adminUsers.map((u) => {
+                    const isSelf = u.id === me.id;
+                    return (
+                      <div
+                        key={u.id}
+                        className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden">
+                            {u.avatar_url ? (
+                              <img src={u.avatar_url} alt={u.username} className="w-full h-full object-cover" />
+                            ) : (
+                              u.username[0].toUpperCase()
+                            )}
+                          </div>
+                          <div className="truncate">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs font-bold truncate">{u.display_name}</p>
+                              {u.is_admin && (
+                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400">
+                                  ADMIN
+                                </span>
+                              )}
+                              {u.is_banned && (
+                                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-rose-500/20 text-rose-400">
+                                  BỊ KHÓA
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 truncate">
+                              @{u.username} • {u.email}
+                            </p>
+                          </div>
+                        </div>
+
+                        {!isSelf && (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAdminRole(u)}
+                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition ${
+                                u.is_admin
+                                  ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                                  : 'bg-slate-200 dark:bg-slate-800 text-slate-300 hover:bg-slate-700'
+                              }`}
+                            >
+                              {u.is_admin ? 'Gỡ Admin' : 'Cấp Admin'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleBanUser(u)}
+                              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium flex items-center gap-1 transition ${
+                                u.is_banned
+                                  ? 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
+                                  : 'bg-rose-500/15 text-rose-400 hover:bg-rose-500/25'
+                              }`}
+                            >
+                              {u.is_banned ? (
+                                <>
+                                  <CheckCircle className="w-3.5 h-3.5" /> Mở khóa
+                                </>
+                              ) : (
+                                <>
+                                  <Ban className="w-3.5 h-3.5" /> Khóa
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : adminGroups.length === 0 ? (
+                  <p className="text-center text-xs text-slate-400 py-8">Chưa có nhóm chat nào trên hệ thống.</p>
+                ) : (
+                  adminGroups.map((g) => (
+                    <div
+                      key={g.id}
+                      className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
+                    >
+                      <div className="truncate">
+                        <p className="text-xs font-bold truncate">{g.name || 'Unnamed Group'}</p>
+                        <p className="text-[11px] text-slate-400">
+                          {g.members?.length || 0} thành viên • Tin nhắn cuối: {g.last_message_text || 'Trống'}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleAdminJoinAndOpenGroup(g)}
+                          className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium"
+                        >
+                          Vào nhóm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAdminDeleteGroup(g.id)}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 text-[11px] font-medium"
+                        >
+                          Xóa nhóm
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         {/* CREATE GROUP MODAL */}
