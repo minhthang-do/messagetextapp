@@ -332,7 +332,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             <MessageSquare className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white tracking-tight">PulseChat</h1>
+            <h1 className="text-xl font-bold text-white tracking-tight">BocPhet Chat</h1>
             <p className="text-xs text-slate-400">Real-Time Cloud Messaging</p>
           </div>
         </div>
